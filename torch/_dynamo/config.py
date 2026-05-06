@@ -118,7 +118,8 @@ side_effect_replay_policy = "info"
 # object. It also controls the maximum size of cache entries if they don't have
 # any ID_MATCH'd guards.
 # [@compile_ignored: runtime_behaviour]
-recompile_limit = 8
+# recompile_limit = 8 # pcg opt for recompile_limit.
+recompile_limit = int(os.environ.get("TORCHDYNAMO_RECOMPILE_LIMIT", 8))
 
 # [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
 accumulated_recompile_limit = 256
