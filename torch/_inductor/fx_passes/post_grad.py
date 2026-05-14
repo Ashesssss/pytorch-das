@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import os
 import functools
 import itertools
 import logging
@@ -68,6 +69,7 @@ from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
+from .mixer_sparse_posfb import fuse_mixer_sparse_posfb
 
 
 _T = TypeVar("_T")
@@ -152,6 +154,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         torch.fx.passes.graph_transform_observer.GraphTransformObserver,
         subsystem="post_grad_passes",
     )
+    enabled_sparse_posfb = os.getenv(
+        "ENABLE_FUSE_SPARSE_PROSFB", ""
+    ).lower() in {"1", "true", "yes", "on"}
+    if enabled_sparse_posfb:
+        GraphTransformObserver(gm, "fuse_mixer_sparse_posfb").apply_graph_pass(
+            fuse_mixer_sparse_posfb
+        )
 
     if config.dce:
         # has some issues with mutation in inference mode
