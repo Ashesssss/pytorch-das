@@ -154,13 +154,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         torch.fx.passes.graph_transform_observer.GraphTransformObserver,
         subsystem="post_grad_passes",
     )
-    enabled_sparse_posfb = os.getenv(
-        "ENABLE_FUSE_SPARSE_PROSFB", ""
-    ).lower() in {"1", "true", "yes", "on"}
-    if enabled_sparse_posfb:
-        GraphTransformObserver(gm, "fuse_mixer_sparse_posfb").apply_graph_pass(
-            fuse_mixer_sparse_posfb
-        )
 
     if config.dce:
         # has some issues with mutation in inference mode
@@ -214,6 +207,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "remove_assert_ops").apply_graph_pass(
             remove_assert_ops
         )
+        enabled_sparse_posfb = os.getenv(
+            "ENABLE_FUSE_SPARSE_PROSFB", ""
+        ).lower() in {"1", "true", "yes", "on"}
+        if enabled_sparse_posfb:
+            GraphTransformObserver(gm, "fuse_mixer_sparse_posfb").apply_graph_pass(
+                fuse_mixer_sparse_posfb
+            )
         for i, patterns in enumerate(pass_patterns):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
