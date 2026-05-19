@@ -516,11 +516,14 @@ def _split_channel_major_kernel_source(
         "copy_out": "*bf16",
         "sum_out": "*fp32",
         "rnumel": "i32",
-        "seq": "i32",
-        "copy_s0": "i64",
+        "base_s1": "i64",
+        "base_s2": "i64",
+        "value_s1": "i64",
+        "value_s2": "i64",
+        "gate_s1": "i64",
+        "gate_s2": "i64",
         "copy_s1": "i64",
         "copy_s2": "i64",
-        "copy_s3": "i64",
         "sum_split": "i32",
         "sum_s2": "i64",
         "sum_s3": "i64",
@@ -547,11 +550,14 @@ def _split_channel_major_kernel_source(
     copy_out,
     sum_out,
     rnumel,
-    seq,
-    copy_s0,
+    base_s1,
+    base_s2,
+    value_s1,
+    value_s2,
+    gate_s1,
+    gate_s2,
     copy_s1,
     copy_s2,
-    copy_s3,
     sum_split,
     sum_s2,
     sum_s3,
@@ -569,14 +575,13 @@ def _split_channel_major_kernel_source(
 
     channel = x // hidden
     half_col = x - channel * hidden
-    batch = r // seq
-    seq_idx = r - batch * seq
 
-    base_offset = channel * rnumel * hidden + r * hidden + half_col
-    other_offset = channel * rnumel * hidden * 2 + r * hidden + half_col
-    copy_left_offset = batch * copy_s0 + seq_idx * copy_s1 + channel * copy_s2 + half_col * copy_s3
-    copy_right_offset = copy_left_offset + hidden * copy_s3
-""" + _kernel_tail("other_offset", "other_offset")
+    base_offset = r * base_s1 + channel * base_s2 + half_col
+    value_offset = r * value_s1 + channel * value_s2 + half_col
+    gate_offset = r * gate_s1 + channel * gate_s2 + half_col
+    copy_left_offset = r * copy_s1 + channel * copy_s2 + half_col
+    copy_right_offset = copy_left_offset + hidden
+""" + _kernel_tail("value_offset", "gate_offset")
 
 
 def _py_tuple(wrapper, values):
@@ -698,7 +703,6 @@ class GatedCatSumCopyTemplateBuffer(ir.TemplateBuffer):
             copy_ref,
             sum_ref,
             rnumel,
-            seq,
         ]
         copy_args = [copy_stride[0], copy_stride[1], copy_stride[2], copy_stride[3]]
         sum_args = [sum_split, sum_stride[2], sum_stride[3], sum_s4]
@@ -713,7 +717,14 @@ class GatedCatSumCopyTemplateBuffer(ir.TemplateBuffer):
         if use_fast_path:
             call_args = [
                 *input_args,
-                *copy_args,
+                match.base.stride[1],
+                match.base.stride[2],
+                match.value.stride[1],
+                match.value.stride[2],
+                match.gate.stride[1],
+                match.gate.stride[2],
+                copy_stride[1],
+                copy_stride[2],
                 *sum_args,
                 hidden_i,
                 channels_i * hidden_i,
@@ -722,6 +733,7 @@ class GatedCatSumCopyTemplateBuffer(ir.TemplateBuffer):
         else:
             call_args = [
                 *input_args,
+                seq,
                 hidden,
                 half_xnumel,
                 *match.base.stride,
@@ -735,25 +747,23 @@ class GatedCatSumCopyTemplateBuffer(ir.TemplateBuffer):
 
     def _supports_split_channel_major_fast_path(self) -> bool:
         match = self.match
-        batch, seq, channels, hidden = (
-            match.batch,
-            match.seq,
-            match.channels,
-            match.hidden,
-        )
+        seq = match.seq
         base_stride = match.base.stride
         value_stride = match.value.stride
         gate_stride = match.gate.stride
+        copy_stride = match.copy.node.get_stride()
+        # Fast path works when batch and seq are already folded into the leading
+        # stride relation, so the kernel can index with r = batch * seq + seq_idx
+        # and keep the layout shape-generic.
         return (
-            _same_expr(base_stride[0], seq * hidden)
-            and _same_expr(base_stride[1], hidden)
-            and _same_expr(base_stride[2], batch * seq * hidden)
+            _same_expr(base_stride[0], seq * base_stride[1])
             and _same_expr(base_stride[3], 1)
-            and _same_expr(value_stride[0], seq * hidden)
-            and _same_expr(value_stride[1], hidden)
-            and _same_expr(value_stride[2], batch * seq * hidden * 2)
+            and _same_expr(value_stride[0], seq * value_stride[1])
             and _same_expr(value_stride[3], 1)
-            and value_stride == gate_stride
+            and _same_expr(gate_stride[0], seq * gate_stride[1])
+            and _same_expr(gate_stride[3], 1)
+            and _same_expr(copy_stride[0], seq * copy_stride[1])
+            and _same_expr(copy_stride[3], 1)
         )
 
 
