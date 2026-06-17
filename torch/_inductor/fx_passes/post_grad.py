@@ -209,10 +209,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "remove_assert_ops").apply_graph_pass(
             remove_assert_ops
         )
-        enabled_sparse_posfb = os.getenv(
-            "ENABLE_FUSE_SPARSE_PROSFB", ""
-        ).lower() in {"1", "true", "yes", "on"}
-        if enabled_sparse_posfb:
+        if config.fuse_sparse_prosfb:
             GraphTransformObserver(gm, "fuse_mixer_sparse_posfb").apply_graph_pass(
                 fuse_mixer_sparse_posfb
             )
