@@ -4118,10 +4118,7 @@ class Scheduler:
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
-        cat_sum_copy_enabled = os.getenv(
-            "ENABLE_FUSE_SPARSE_PROSFB", ""
-        ).lower() in {"1", "true", "yes", "on"}
-        if cat_sum_copy_enabled:
+        if config.fuse_sparse_prosfb:
             from torch._inductor.fx_passes.gated_cat_sum_copy_scheduler import (
                 fuse_cat_copy_for_sum_copy_users,
             )
