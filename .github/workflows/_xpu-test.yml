@@ -81,19 +81,19 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
-    timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     runs-on: ${{ matrix.runner }}
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.13
 
       - name: Setup XPU
         uses: ./.github/actions/setup-xpu
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.12
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.13
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
@@ -107,7 +107,7 @@ jobs:
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.12
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.13
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -159,7 +159,7 @@ jobs:
         id: test-timeout
         shell: bash
         env:
-          JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+          JOB_TIMEOUT: ${{ inputs.timeout-minutes }}
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
@@ -191,7 +191,6 @@ jobs:
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
-          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
@@ -242,7 +241,6 @@ jobs:
             -e SCCACHE_REGION \
             -e SCCACHE_S3_KEY_PREFIX \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
-            -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e TESTS_TO_INCLUDE \
             -e ZE_AFFINITY_MASK \
@@ -342,7 +340,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.12
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.13
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false
