@@ -47,7 +47,7 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
         with:
-          allowed_bots: "pytorch-auto-revert[bot]"
+          allowed_bots: "pytorch-auto-revert[bot],pytorch-bot[bot]"
           use_bedrock: "true"
           claude_args: |
             --model global.anthropic.claude-opus-4-6-v1
@@ -100,14 +100,14 @@ jobs:
                - Is this signal fundamentally unreliable? (Persistent timeouts, environment-dependent flakes, resource exhaustion not caused by any code change)
 
             6. **Render your verdict:**
-               - `revert` — You found a plausible causal chain from the code change to the failure. Confidence should reflect how direct and clear the chain is.
-               - `not_related` — After thorough investigation, there is no plausible causal chain. The failure has a clear alternative explanation.
-               - `unsure` — The investigation is inconclusive. There may be a connection but you cannot confirm it with sufficient confidence.
-               - `garbage` — The signal itself is unreliable and should be temporarily suppressed. Use this when the failure is clearly not caused by ANY code change: persistent infra flakes (runner timeouts, network errors, GPU driver crashes), environment issues (disk full, dependency mirror outage), or tests so flaky that the signal has no diagnostic value. This tells autorevert to ignore this signal for ~2 hours.
+               - `revert` 鈥?You found a plausible causal chain from the code change to the failure. Confidence should reflect how direct and clear the chain is.
+               - `not_related` 鈥?After thorough investigation, there is no plausible causal chain. The failure has a clear alternative explanation.
+               - `unsure` 鈥?The investigation is inconclusive. There may be a connection but you cannot confirm it with sufficient confidence.
+               - `garbage` 鈥?The signal itself is unreliable and should be temporarily suppressed. Use this when the failure is clearly not caused by ANY code change: persistent infra flakes (runner timeouts, network errors, GPU driver crashes), environment issues (disk full, dependency mirror outage), or tests so flaky that the signal has no diagnostic value. This tells autorevert to ignore this signal for ~2 hours.
 
             When in doubt between `unsure` and `not_related`, prefer `unsure`. A false `not_related` verdict is more costly than an `unsure` (which just lets autorevert continue its normal restart-to-confirm flow).
 
-            Use `garbage` only when the failure clearly has nothing to do with any code change — it's a statement about the signal quality, not about the suspect commit.
+            Use `garbage` only when the failure clearly has nothing to do with any code change 鈥?it's a statement about the signal quality, not about the suspect commit.
 
             IMPORTANT: Be thorough. Read actual code. Trace actual call paths. Do not guess based on file names alone.
 
@@ -170,4 +170,4 @@ jobs:
 
       - name: Upload usage metrics
         if: always()
-        uses: pytorch/test-infra/.github/actions/upload-claude-usage@release/2.12
+        uses: pytorch/test-infra/.github/actions/upload-claude-usage@release/2.13

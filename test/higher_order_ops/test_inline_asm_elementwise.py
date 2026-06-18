@@ -21,9 +21,12 @@ from torch.testing._internal.common_utils import (
     NAVI_ARCH,
     parametrize,
     run_tests,
+    skipIfRocm,
     TEST_CUDA,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
+from torch.utils._triton import has_triton
 
 
 @dataclass
@@ -322,6 +325,10 @@ class TestInlineAsmElementwise(TestCase):
                 pack=tc.pack,
             )
 
+        # This test always runs torch.compile(inductor); Inductor needs Triton for CUDA.
+        if not has_triton():
+            self.skipTest("Requires Triton")
+
         torch._dynamo.reset()
         compiled_result = torch.compile(fn, backend="inductor")(*inputs)
 
@@ -334,6 +341,11 @@ class TestInlineAsmElementwise(TestCase):
             eager_result = fn(*inputs)
             self.assertEqual(eager_result, compiled_result)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180228")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180131")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180124")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180116")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180132")
     @parametrize(
         "case_idx", list(range(len(TEST_CASES))), name_fn=lambda i: TEST_CASE_NAMES[i]
     )
@@ -373,6 +385,8 @@ class TestInlineAsmElementwise(TestCase):
             )
 
         if tc.compile_only:
+            if not has_triton():
+                self.skipTest("torch.compile requires Triton")
             torch._dynamo.reset()
             result = torch.compile(fn, backend="inductor")(*inputs)
         else:
@@ -472,6 +486,7 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         self.assertEqual(result.shape, x.shape)
         self.assertEqual(result, x)
 
+    @xfailIfNoAcceleratorTriton
     def test_composition_with_pytorch_ops(self):
         def fn(x, y):
             z = x * 2
@@ -531,6 +546,7 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         self.assertEqual(eager_result.shape, fake_result.shape)
         self.assertEqual(eager_result.stride(), fake_result.stride())
 
+    @xfailIfNoAcceleratorTriton
     def test_dynamic_shapes(self):
         def fn(x, y):
             return inline_asm_elementwise(
@@ -555,6 +571,7 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
+@xfailIfNoAcceleratorTriton
 class TestInlineAsmPackPadding(TestCase):
     """Test that pack padding works when block size < pack."""
 

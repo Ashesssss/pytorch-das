@@ -7,7 +7,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
@@ -22,7 +21,7 @@
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
 #include <ATen/native/hip/ck_group_gemm.h>
 #endif
 #include <ATen/ceil_div.h>
@@ -718,41 +717,34 @@ std::optional<c10::ScalarType> out_dtype) {
   // On ROCm fast path routes to group_gemm_ck and slow path to _grouped_mm_fallback.
   // Keep use_fast_path as false till ck kernel perf is optimal.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
-  bool use_fast_path = false;
-  // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
-
   bool use_hipblaslt = false;
   static const auto env_hipblaslt = std::getenv("USE_HIPBLASLT_GROUPMM");
   if (env_hipblaslt != nullptr && std::string(env_hipblaslt) == "1") {
-      use_hipblaslt = true;
+    use_hipblaslt = true;
   }
 
-#if defined(USE_ROCM_CK_GEMM)
-  if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
-    use_fast_path = true;
-  }
-#endif //USE_ROCM_CK_GEMM
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
-  if (use_fast_path) {
+#if defined(USE_ROCM_CK_GEMM)
+  // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
+  // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
+  if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
     at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
+  } else
+#endif //USE_ROCM_CK_GEMM
+  if (use_hipblaslt) {
+    try {
+      at::hip::detail::hipblaslt_grouped_gemm(mat_a, mat_b, offs, bias, out);
+    } catch (const c10::Error& e) {
+      if (std::string(e.what()).find("no valid algorithm found") != std::string::npos) {
+        TORCH_WARN("hipblaslt_grouped_gemm failed with 'no valid algorithm found', falling back to generic fallback");
+        _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+      } else {
+        throw;
+      }
+    }
   } else {
-      if(use_hipblaslt){
-        try {
-          at::hip::detail::hipblaslt_grouped_gemm(mat_a, mat_b, offs, bias, out);
-        } catch (const c10::Error& e) {
-          if (std::string(e.what()).find("no valid algorithm found") != std::string::npos) {
-            TORCH_WARN("hipblaslt_grouped_gemm failed with 'no valid algorithm found', falling back to generic fallback");
-            _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
-          }
-          else {
-            throw; 
-          }
-        }
-      }
-      else {
-      _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
-      }
+    _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }
 #endif //ifndef USE_ROCM
   return out;
