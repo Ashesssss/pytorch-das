@@ -648,7 +648,7 @@ def forward(self, obj_attr, x):
     getitem_2 = takes_foo_tuple_return_default[1];  takes_foo_tuple_return_default = None
     add = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
     takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(foo = obj_attr, x = add);  obj_attr = add = None
-    return (takes_foo_default,)""",  # noqa: B950
+    return (takes_foo_default,)""",
         )
 
     def test_fakify_script_objects(self):
@@ -909,7 +909,7 @@ def forward(self, x):
     sub = torch.ops.aten.sub.Tensor(add_1, 1)
     sub_1 = torch.ops.aten.sub.Tensor(add_2, 1)
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
-    """,  # noqa: B950
+    """,
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS[
@@ -935,7 +935,7 @@ def forward(self, x):
     sub = wrap_with_set_grad_enabled_1[0]
     sub_1 = wrap_with_set_grad_enabled_1[1];  wrap_with_set_grad_enabled_1 = None
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
-    """,  # noqa: B950
+    """,
         )
 
     def test_sequential_split(self):
@@ -1153,7 +1153,7 @@ def forward(self, x):
     sub = wrap_with_autocast_2[0]
     sub_1 = wrap_with_autocast_2[1];  wrap_with_autocast_2 = None
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
-    """,  # noqa: B950
+    """,
         )
 
         self.assertExpectedInline(
@@ -1346,7 +1346,7 @@ def forward(self, x):
     to = torch.ops.aten.to.device(x, 'cuda', torch.float32);  x = None
     add = torch.ops.aten.add.Tensor(to, to);  to = None
     return (add,)
-    """,  # noqa: B950
+    """,
         )
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
@@ -1368,7 +1368,7 @@ def forward(self, arg0_1):
     to = torch.ops.aten.to.dtype_layout(arg0_1, dtype = torch.float32, layout = torch.strided, device = 'cuda');  arg0_1 = None
     add = torch.ops.aten.add.Tensor(to, to);  to = None
     return (add,)
-    """,  # noqa: B950
+    """,
         )
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
