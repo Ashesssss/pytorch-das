@@ -939,6 +939,7 @@ void bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half))
     preferred = BlasBackend::Cublas;
   }
 #endif
+  #if defined(USE_ROCM) && ROCM_VERSION >= 60100
   if (preferred == BlasBackend::Cublaslt) {
     if (!bgemm_internal_cublaslt<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half))) {
       bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
@@ -1561,6 +1562,7 @@ void gemm_internal<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half))
     preferred = BlasBackend::Cublas;
   }
 #endif
+  #if defined(USE_ROCM) && ROCM_VERSION >= 60100
   if (preferred == BlasBackend::Cublaslt) {
     gemm_internal_cublaslt<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
   }
