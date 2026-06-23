@@ -102,6 +102,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   comm->initialized_ = !comm->nonBlocking_;
   return comm;
 }
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
 std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
     int numRanks,
     int rank,
@@ -132,6 +133,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
   comm->initialized_ = !comm->nonBlocking_;
   return comm;
 }
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
 
 ncclComm_t NCCLComm::getNcclComm() {
   LockType lock(mutex_);

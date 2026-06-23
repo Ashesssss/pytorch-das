@@ -3149,7 +3149,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
   // according to
   // https://github.com/pytorch/pytorch/pull/136789#discussion_r1779171615.
   auto ranksPerRoot = getCvarInt(TORCH_NCCL_RANKS_PER_ROOT, 128);
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
   useScalableInit = !singleP2POp && (getSize() > ranksPerRoot);
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
 
   if (useScalableInit) {
     auto numRoots = (getSize() + ranksPerRoot - 1) / ranksPerRoot;
@@ -3173,8 +3175,16 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       LOG(INFO) << logPrefix()
                 << "ProcessGroupNCCL all-gather unique IDs through store took "
                 << timerDeltaMs << " ms";
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
       ncclComm = NCCLComm::create_scalable(
           numRanks, rank, ncclIDs, deviceIndex, options_->config);
+#else
+      C10_THROW_ERROR(
+          DistBackendError,
+          c10::str(
+              logPrefix(),
+              "create_scalable is called when NCCL_HAS_INIT_RANK_SCALABLE is not defined"));
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
     }
   } else {
     // To simplify conditional nesting, just create the ncclComms[i]
