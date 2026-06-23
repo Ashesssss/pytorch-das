@@ -19,8 +19,12 @@
 constexpr int64_t kCommInitBusyWaitMillis = 2;
 
 static_assert(
-    NCCL_VERSION_CODE >= NCCL_VERSION(2, 23, 0),
-    "NCCL version must be 2.23 or later");
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 7, 0),
+    "NCCL version must be 2.7 or later");
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 23, 0)
+#define NCCL_HAS_INIT_RANK_SCALABLE
+#endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 24, 0)
 #define NCCL_SUPPORTS_FP8
@@ -247,12 +251,14 @@ class NCCLComm {
       ncclUniqueId commId,
       at::DeviceIndex deviceIndex,
       ncclConfig_t& config);
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
   static std::shared_ptr<NCCLComm> create_scalable(
       int numRanks,
       int rank,
       std::vector<ncclUniqueId>& commIds,
       at::DeviceIndex deviceIndex,
       ncclConfig_t& config);
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
 
   static std::shared_ptr<NCCLComm> split(
       NCCLComm* source,
