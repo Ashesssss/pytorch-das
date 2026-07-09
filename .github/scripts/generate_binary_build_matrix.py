@@ -24,15 +24,17 @@ SCRIPT_DIR = Path(__file__).absolute().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
-CUDA_ARCHES = ["12.6", "13.0", "13.2"]
+CUDA_ARCHES = ["12.6", "12.9", "13.0", "13.2"]
 CUDA_STABLE = "13.0"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
-    "13.0": "13.0.2",
+    "12.9": "12.9.1",
+    "13.0": "13.0.3",
     "13.2": "13.2.1",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
+    "12.9": "9",
     "13.0": "9",
     "13.2": "9",
 }
@@ -47,14 +49,11 @@ CPU_S390X_ARCH = ["cpu-s390x"]
 
 CUDA_AARCH64_ARCHES = [
     "12.6-aarch64",
+    "12.9-aarch64",
     "13.0-aarch64",
     "13.2-aarch64",
 ]
 
-
-# WARNING: For CUDA 13.0, cublas is pinned to a version range rather
-# than an exact version. A broken cublas release within that range will be
-# silently pulled in.
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | "
@@ -64,9 +63,16 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
+    "12.9": (
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' | "
+        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' and python_version < '3.15' | "
+        "nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | "
+        "nvidia-cusparselt-cu12==0.8.1; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
+    ),
     "13.0": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "
-        "nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
@@ -311,7 +317,7 @@ WHEEL_CONTAINER_IMAGES = {
 # inside these containers, so only those images are pinned. s390x is excluded:
 # its builder images are built locally on self-hosted runners and never published
 # to docker.io under the pinned tag, so pinning it breaks the image pull.
-DOCKER_IMAGE_PIN = "f38ba0b10220982e39441d29d203d803a2b56c92"
+DOCKER_IMAGE_PIN = "78e737ad29420ffc4800e677c51e2a852caf8359"
 MANYWHEEL_OSES = ("linux", "linux-aarch64")
 
 
@@ -362,7 +368,9 @@ def generate_libtorch_matrix(
     if arches is None:
         arches = ["cpu"]
         if os == "windows":
-            arches += CUDA_ARCHES
+            # CUDA 12.9 is only built for Linux
+            windows_cuda_arches = list_without(CUDA_ARCHES, ["12.9"])
+            arches += windows_cuda_arches
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -415,7 +423,9 @@ def generate_wheels_matrix(
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
-            arches += CUDA_ARCHES + XPU_ARCHES
+            # CUDA 12.9 is only built for Linux
+            windows_cuda_arches = list_without(CUDA_ARCHES, ["12.9"])
+            arches += windows_cuda_arches + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
@@ -457,7 +467,7 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["13.2", "13.0", "12.6"]
+                arch_version in ["13.2", "13.0", "12.9", "12.6"]
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
@@ -534,6 +544,7 @@ def generate_libtorch_extraction_configs(
     uses to add an extraction job that depends on that wheel's build job.
     """
     preferred_python = "3.11" if os == "windows-arm64" else "3.10"
+    arch = "arm64" if os == "windows-arm64" else "x86_64"
 
     # Group wheel configs by (gpu_arch_type, gpu_arch_version)
     arch_to_config: dict[tuple[str, str], dict[str, str]] = {}
@@ -550,7 +561,10 @@ def generate_libtorch_extraction_configs(
 
         desired_cuda = source_config["desired_cuda"]
         libtorch_variant = "shared-with-deps"
-        build_name = f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release".replace(
+        # Include arch in the build name so windows x86_64 and arm64 libtorch
+        # packages don't share a name and overwrite each other on upload.
+        arch_tag = f"{arch}-" if os == "windows-arm64" else ""
+        build_name = f"libtorch-{arch_tag}{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release".replace(
             ".", "_"
         )
 
@@ -564,6 +578,7 @@ def generate_libtorch_extraction_configs(
                 "desired_cuda": desired_cuda,
                 "gpu_arch_type": gpu_arch_type,
                 "gpu_arch_version": gpu_arch_version,
+                "arch": arch,
             }
         )
 
