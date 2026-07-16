@@ -1472,9 +1472,56 @@ if(USE_ROCM)
 
   message(INFO "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM} rocshmem_FOUND=${rocshmem_FOUND} rocshmem_VERSION=${rocshmem_VERSION}")
   if(USE_NVSHMEM)
-    if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL "3.3.0")
+    # if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL "3.3.0")
+    if(NOT rocshmem_FOUND)
+      set(_ROCSHMEM_SEARCH_PREFIXES)
+      foreach(_rocshmem_prefix
+        "$ENV{ROCSHMEM_HOME}"
+        "$ENV{ROCM_PATH}"
+        "${ROCM_SOURCE_DIR}")
+        if(_rocshmem_prefix)
+          list(APPEND _ROCSHMEM_SEARCH_PREFIXES
+            "${_rocshmem_prefix}"
+            "${_rocshmem_prefix}/rocshmem")
+        endif()
+      endforeach()
+      list(REMOVE_DUPLICATES _ROCSHMEM_SEARCH_PREFIXES)
+
+      find_package(rocshmem CONFIG QUIET
+        PATHS ${_ROCSHMEM_SEARCH_PREFIXES}
+        PATH_SUFFIXES lib/cmake/rocshmem)
+
+      if(NOT rocshmem_FOUND)
+        find_library(ROCSHMEM_LIB
+          NAMES rocshmem
+          HINTS ${_ROCSHMEM_SEARCH_PREFIXES}
+          PATH_SUFFIXES lib lib64
+          DOC "The location of rocSHMEM host library.")
+        find_path(ROCSHMEM_INCLUDE_DIR
+          NAMES rocshmem/rocshmem.hpp
+          HINTS ${_ROCSHMEM_SEARCH_PREFIXES}
+          PATH_SUFFIXES include
+          DOC "The location of rocSHMEM headers.")
+
+        if(ROCSHMEM_LIB AND ROCSHMEM_INCLUDE_DIR)
+          if(NOT TARGET roc::rocshmem)
+            add_library(roc::rocshmem STATIC IMPORTED)
+            set_target_properties(roc::rocshmem PROPERTIES
+              IMPORTED_LOCATION "${ROCSHMEM_LIB}"
+              INTERFACE_INCLUDE_DIRECTORIES "${ROCSHMEM_INCLUDE_DIR}")
+          endif()
+          set(rocshmem_FOUND TRUE)
+          message(STATUS
+            "rocSHMEM found via manual fallback: "
+            "ROCSHMEM_LIB=${ROCSHMEM_LIB}, "
+            "ROCSHMEM_INCLUDE_DIR=${ROCSHMEM_INCLUDE_DIR}")
+        endif()
+      endif()
+    endif()
+
+    if(rocshmem_FOUND)
       # rocSHMEM upstream ships device code for a subset of AMD gfx targets only.
-      set(ROCSHMEM_SUPPORTED_ARCH gfx90a gfx942 gfx950 gfx1100 gfx1201)
+      set(ROCSHMEM_SUPPORTED_ARCH gfx936 gfx938)
       set(_torch_rocshmem_build_arches)
       foreach(_arch ${PYTORCH_ROCM_ARCH})
         list(FIND ROCSHMEM_SUPPORTED_ARCH "${_arch}" _rocsmem_supported_idx)
@@ -1500,29 +1547,90 @@ if(USE_ROCM)
         )
         set_source_files_properties(${TORCH_ROCSHMEM_SRCS} PROPERTIES LANGUAGE HIP)
 
+        get_target_property(_torch_hip_sources torch_hip SOURCES)
+        if(_torch_hip_sources)
+          list(REMOVE_ITEM _torch_hip_sources ${TORCH_ROCSHMEM_SRCS})
+          set_property(TARGET torch_hip PROPERTY SOURCES ${_torch_hip_sources})
+        endif()
+
+        string(REPLACE "-Wl,--copy-dt-needed-entries" "" CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
+        string(REPLACE "-Wl,--copy-dt-needed-entries" "" CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS}")
+
         add_library(torch_rocshmem SHARED ${TORCH_ROCSHMEM_SRCS})
+        set_target_properties(torch_rocshmem PROPERTIES
+          LINKER_LANGUAGE HIP
+          HIP_ARCHITECTURES "${_torch_rocshmem_build_arches}"
+          LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+          OUTPUT_NAME "torch_rocshmem")
 
-        # Override the global -fno-gpu-rdc with -fgpu-rdc so device linker
-        # can pull in rocSHMEM device APIs.
-        target_compile_options(torch_rocshmem PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-fgpu-rdc>)
-
-        set_target_properties(torch_rocshmem PROPERTIES LINKER_LANGUAGE HIP)
-
-
-        # torch_rocshmem is built with -fgpu-rdc, so its HIP link step performs
-        # device linking and must carry the full arch list explicitly.
-        set_target_properties(
-            torch_rocshmem PROPERTIES HIP_ARCHITECTURES "${_torch_rocshmem_build_arches}")
+        target_link_options(
+          torch_rocshmem
+          PRIVATE
+            $<$<LINK_LANGUAGE:HIP>:
+              -fgpu-rdc
+              --hip-link
+            >)
+        foreach(_rocm_arch ${_torch_rocshmem_build_arches})
+          target_link_options(
+            torch_rocshmem
+            PRIVATE
+              $<$<LINK_LANGUAGE:HIP>:--offload-arch=${_rocm_arch}>)
+        endforeach()
 
 
         target_compile_definitions(torch_hip PUBLIC USE_NVSHMEM)
         target_compile_definitions(torch_rocshmem PUBLIC USE_NVSHMEM USE_ROCM)
 
-        target_link_libraries(torch_rocshmem PRIVATE roc::rocshmem)
+        find_library(AMDHIP64 amdhip64 $ENV{ROCM_PATH}/lib)
+        find_library(IBVERBS ibverbs)
+        find_library(MLX5 mlx5)
+        find_library(ROCSHMEM_MPI_LIBRARY
+          NAMES mpi
+          HINTS /opt/mpi/lib /opt/mpi/lib64
+          REQUIRED)
+        target_include_directories(torch_rocshmem SYSTEM PRIVATE
+          "${ROCSHMEM_INCLUDE_DIR}"
+          ${MPI_CXX_INCLUDE_DIRS}
+          ${MPI_CXX_COMPILER_INCLUDE_DIRS})
+
+        # Use the archive represented by roc::rocshmem without importing its
+        # hip::host interface, whose global GPU_TARGETS would add unsupported
+        # architectures back to this restricted target.
+        set(_torch_rocshmem_library "${ROCSHMEM_LIB}")
+        if(TARGET roc::rocshmem)
+          set(_torch_rocshmem_library "$<TARGET_FILE:roc::rocshmem>")
+        endif()
+        target_link_libraries(
+          torch_rocshmem
+          PRIVATE
+            "${_torch_rocshmem_library}"
+            hsa-runtime64::hsa-runtime64
+            ${ROCSHMEM_MPI_LIBRARY}
+            ${AMDHIP64}
+            ${IBVERBS}
+            ${MLX5})
         target_link_libraries(torch_hip PRIVATE torch_rocshmem)
+
+        target_compile_options(
+          torch_rocshmem
+          PRIVATE
+            -fPIC
+            -O3
+            -Wno-return-type
+            $<$<COMPILE_LANGUAGE:HIP>:
+              -fgpu-rdc
+              --hip-link
+            >)
+        foreach(_rocm_arch ${_torch_rocshmem_build_arches})
+          target_compile_options(
+            torch_rocshmem
+            PRIVATE
+              $<$<COMPILE_LANGUAGE:HIP>:--offload-arch=${_rocm_arch}>)
+        endforeach()
 
         install(TARGETS torch_rocshmem EXPORT Caffe2Targets DESTINATION
           "${TORCH_INSTALL_LIB_DIR}")
+        message(STATUS "=== install libtorch_rocshmem.so success === " )
       else()
         message(STATUS
           "rocSHMEM found but skipped: PYTORCH_ROCM_ARCH has no entry in "
