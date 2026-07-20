@@ -3195,6 +3195,24 @@ class SIMDScheduling(BaseScheduling):
         """
         Helper method to codegen a single template kernel variant
         """
+        from torch._inductor.fx_passes.gated_cat_sum_copy_scheduler import (
+            GatedCatSumCopyTemplateBuffer,
+        )
+
+        if isinstance(template_node.node, GatedCatSumCopyTemplateBuffer):
+            assert not epilogue_nodes
+            assert not prologue_nodes
+            if only_gen_src_code:
+                return None
+            template_node.mark_run()
+            template_node.node.codegen_template(V.graph.wrapper_code)
+            self.free_buffers_in_scheduler()
+            return None
+
+        _, (_numel, rnumel) = template_node.group
+        assert rnumel == 1
+        kernel, render = template_node.node.make_kernel_render(template_node.node)
+
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
         prologue_group = []

@@ -4748,6 +4748,18 @@ def _persistent_reduction_configs(
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
     warp_size = triton_meta["device"].warp_size_or_default
+    if rnumel <= 32 and xnumel >= 1 << 20:
+        xblocks = (128, 256, 512, 1024)
+        max_elements = 16384 #限制 XBLOCK * rnumel 不要太大，避免单 program 里元素太多导致寄存器/编译/occupancy 出问题
+    else:
+        xblocks = (1, 8, 32, 128)
+        max_elements = 4096
+    
+    configs = [
+        triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
+        for xblock in xblocks
+        if xblock == 1 or (rnumel * xblock <= max_elements and xblock <= xnumel)
+    ]
 
     if triton_meta.get("native_matmul"):
         native_matmul_rblock = inductor_meta.get("native_matmul_persistent_rblock")

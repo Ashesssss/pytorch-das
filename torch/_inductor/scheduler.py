@@ -4118,6 +4118,22 @@ class Scheduler:
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
+        if config.fuse_sparse_prosfb:
+            from torch._inductor.fx_passes.gated_cat_sum_copy_scheduler import (
+                fuse_cat_copy_for_sum_copy_users,
+            )
+
+            self.nodes = fuse_cat_copy_for_sum_copy_users(self.nodes)
+            self.name_to_node = {n.get_name(): n for n in self.nodes}
+            self.name_to_buf = {
+                buf.get_name(): buf for node in self.nodes for buf in node.get_outputs()
+            }
+            self.name_to_fused_node.update({n.get_name(): n for n in self.nodes})
+            self.mutation_real_name = {}
+            self.mutation_renames = {}
+            self.compute_dependencies()
+            self.nodes = self.topological_sort_schedule(self.nodes)
+
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
 
