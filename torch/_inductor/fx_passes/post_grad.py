@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import os
 import functools
 import itertools
 import logging
@@ -68,6 +69,9 @@ from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
+from .mixer_sparse_posfb import fuse_mixer_sparse_posfb
+from .fused_unbind_stack_backward import fused_unbind_stack_backward_pass
+
 
 
 _T = TypeVar("_T")
@@ -205,6 +209,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "remove_assert_ops").apply_graph_pass(
             remove_assert_ops
         )
+        if config.fuse_sparse_prosfb:
+            GraphTransformObserver(gm, "fuse_mixer_sparse_posfb").apply_graph_pass(
+                fuse_mixer_sparse_posfb
+            )
+            GraphTransformObserver(
+                gm, "fused_unbind_stack_backward_pass"
+            ).apply_graph_pass(fused_unbind_stack_backward_pass)
         for i, patterns in enumerate(pass_patterns):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
