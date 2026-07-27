@@ -220,6 +220,7 @@ online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
 apply_gumbel_max_trick = (
     os.environ.get("TORCHINDUCTOR_APPLY_GUMBEL_MAX_TRICK", "1") == "1"
+)
 # Enable sparse/prosfb graph and scheduler fusion passes.
 fuse_sparse_prosfb = (
     os.environ.get("ENABLE_FUSE_SPARSE_PROSFB", "0") == "1"
