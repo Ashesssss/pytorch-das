@@ -202,14 +202,45 @@ list(FILTER CMAKE_MODULE_PATH EXCLUDE REGEX ".*/cmake/hip$")
 set(PYTORCH_FOUND_HIP TRUE)
 find_package_and_print_version(hip REQUIRED CONFIG)
 
-# Map lowercase hip_VERSION vars (from CONFIG mode) to uppercase HIP_VERSION
-# vars that the rest of PyTorch's build expects (previously set by FindHIP MODULE).
-if(hip_VERSION AND NOT HIP_VERSION)
-  set(HIP_VERSION "${hip_VERSION}")
-  set(HIP_VERSION_MAJOR "${hip_VERSION_MAJOR}")
-  set(HIP_VERSION_MINOR "${hip_VERSION_MINOR}")
-  set(HIP_VERSION_PATCH "${hip_VERSION_PATCH}")
+# Keep the CONFIG package version separate from the HIP feature version.
+# Some distributions retain an older package/ABI version for binary
+# compatibility even when the HIP headers expose a newer feature version.
+set(HIP_PACKAGE_VERSION "${hip_VERSION}")
+set(HIP_PACKAGE_VERSION_MAJOR "${hip_VERSION_MAJOR}")
+set(HIP_PACKAGE_VERSION_MINOR "${hip_VERSION_MINOR}")
+set(HIP_PACKAGE_VERSION_PATCH "${hip_VERSION_PATCH}")
+
+# Read the feature version from the HIP SDK selected by hip CONFIG. The
+# uppercase HIP_VERSION* variables are consumed throughout the existing
+# PyTorch build, so retain that interface with feature-version semantics.
+find_file(PYTORCH_HIP_VERSION_HEADER
+  NAMES hip/hip_version.h
+  NO_DEFAULT_PATH
+  PATHS ${hip_INCLUDE_DIRS} ${ROCM_INCLUDE_DIRS}
+)
+if(NOT PYTORCH_HIP_VERSION_HEADER)
+  message(FATAL_ERROR "Could not find hip/hip_version.h in ${hip_INCLUDE_DIRS}")
 endif()
+
+file(READ "${PYTORCH_HIP_VERSION_HEADER}" PYTORCH_HIP_VERSION_CONTENT)
+foreach(HIP_VERSION_PART MAJOR MINOR PATCH)
+  string(REGEX MATCH
+    "#define[ \\t]+HIP_VERSION_${HIP_VERSION_PART}[ \\t]+([0-9]+)"
+    PYTORCH_HIP_VERSION_MATCH
+    "${PYTORCH_HIP_VERSION_CONTENT}")
+  if(NOT PYTORCH_HIP_VERSION_MATCH)
+    message(FATAL_ERROR "Could not parse HIP_VERSION_${HIP_VERSION_PART} from ${PYTORCH_HIP_VERSION_HEADER}")
+  endif()
+  set(PYTORCH_HIP_FEATURE_VERSION_${HIP_VERSION_PART} "${CMAKE_MATCH_1}")
+endforeach()
+
+set(HIP_VERSION_MAJOR "${PYTORCH_HIP_FEATURE_VERSION_MAJOR}")
+set(HIP_VERSION_MINOR "${PYTORCH_HIP_FEATURE_VERSION_MINOR}")
+set(HIP_VERSION_PATCH "${PYTORCH_HIP_FEATURE_VERSION_PATCH}")
+set(HIP_VERSION "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
+
+message(STATUS "HIP CMake package ABI version: ${HIP_PACKAGE_VERSION}")
+message(STATUS "HIP feature version from ${PYTORCH_HIP_VERSION_HEADER}: ${HIP_VERSION}")
 
 if(PYTORCH_FOUND_HIP)
   if(HIP_VERSION)
