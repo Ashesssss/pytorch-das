@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 import torch
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 
 from torch._inductor import ir
 
@@ -58,7 +58,7 @@ def _hinted_int(value):
     if isinstance(value, int):
         return value
     try:
-        return int(hint_int(value))
+        return int(optimization_hint(value))
     except Exception:
         pass
     try:

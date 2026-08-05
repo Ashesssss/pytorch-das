@@ -11,7 +11,7 @@ import torch
 import triton
 import triton.language as tl
 from torch.fx import Graph, Node
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch._inductor.runtime.triton_helpers import math as tl_math
 
@@ -240,7 +240,7 @@ def _shape_as_int(value: object) -> Optional[int]:
         return value
     if isinstance(value, torch.SymInt):
         try:
-            return hint_int(value)
+            return optimization_hint(value)
         except Exception:
             return None
     try:
