@@ -1044,8 +1044,6 @@ if(USE_ROCM)
         list(APPEND HIP_CXX_FLAGS -O3)
         list(APPEND HIP_CXX_FLAGS -w)
     endif()
-    list(APPEND HIP_HIPCC_FLAGS --gpu-max-threads-per-block=1024)
-
     list(APPEND HIP_CXX_FLAGS -DHIP_ENABLE_WARP_SYNC_BUILTINS)
     list(APPEND HIP_CXX_FLAGS -DBF162FLOAT_USE_ASM)
     #list(APPEND HIP_CXX_FLAGS -mno-fma)
@@ -1080,6 +1078,7 @@ if(USE_ROCM)
     endif()
     # CMAKE_HIP_FLAGS: flags passed to the HIP compiler for device code.
     # Architecture is handled by CMAKE_HIP_ARCHITECTURES (set in LoadHIP.cmake).
+    string(APPEND CMAKE_HIP_FLAGS " --gpu-max-threads-per-block=1024")
     string(APPEND CMAKE_HIP_FLAGS " --offload-compress --offload-compress-format=zlib -std=c++20")
     # Pass device library path for theRock nightly builds
     if(DEFINED ENV{HIP_DEVICE_LIB_PATH})
