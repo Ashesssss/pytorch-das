@@ -3499,6 +3499,33 @@ class FakeTensorDispatchCache(TestCase):
                     extract_tensor_metadata(b),
                 )
 
+    @unittest.skipIf(not (RUN_CUDA and torch.version.hip), "requires ROCm")
+    def test_cache_nonview_output_storage_offset_and_alias(self):
+        # HIP SDPA returns RNG seed/offset scalars that share storage, where
+        # the offset scalar has storage_offset=1.  This exercises cache-hit
+        # reconstruction of non-view outputs with both properties.
+        q = torch.randn((4, 4, 3, 8), dtype=torch.float16, device="cuda")
+        k = torch.randn((4, 4, 6, 8), dtype=torch.float16, device="cuda")
+        v = torch.randn((4, 4, 6, 8), dtype=torch.float16, device="cuda")
+        op = aten._scaled_dot_product_flash_attention.default
+
+        with FakeTensorMode() as mode:
+            fake_q, fake_k, fake_v = (
+                mode.from_tensor(t, static_shapes=True) for t in (q, k, v)
+            )
+            FakeTensorMode.cache_clear()
+            first = op(fake_q, fake_k, fake_v, 0.0, False, False, scale=None)
+            second = op(fake_q, fake_k, fake_v, 0.0, False, False, scale=None)
+
+        for result in (first, second):
+            self.assertEqual(result[6].storage_offset(), 0)
+            self.assertEqual(result[7].storage_offset(), 1)
+            self.assertEqual(
+                result[6].untyped_storage()._cdata,
+                result[7].untyped_storage()._cdata,
+            )
+        self.assertGreaterEqual(FakeTensorMode.cache_info().hits, 1)
+
     def test_cache_aten_index(self):
         with FakeTensorMode():
             x = torch.randn(4, 4, 4)
