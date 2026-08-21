@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMeta,
     instantiate_device_type_tests,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     onlyOn,
     OpDTypes,
