@@ -1,6 +1,7 @@
 # Owner(s): ["module: tests"]
 
 import math
+import os
 import random
 import unittest
 from numbers import Number
@@ -95,6 +96,31 @@ def skip_helper_fp64_onE100(device, dtype):
 ###
 
 class TestUnaryUfuncs(TestCase):
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_rocm_fast_sqrt_special_values(self, device, dtype):
+        if not TEST_WITH_ROCM:
+            self.skipTest("ROCm-only fast sqrt path")
+
+        values = torch.tensor(
+            [0.0, -0.0, 1.0, 4.0, float("inf"), float("nan"), -1.0],
+            device=device,
+            dtype=dtype,
+        )
+        previous = os.environ.get("PYTORCH_ROCM_FAST_SQRT")
+        try:
+            os.environ["PYTORCH_ROCM_FAST_SQRT"] = "0"
+            reference = torch.sqrt(values)
+            os.environ["PYTORCH_ROCM_FAST_SQRT"] = "1"
+            result = torch.sqrt(values)
+        finally:
+            if previous is None:
+                os.environ.pop("PYTORCH_ROCM_FAST_SQRT", None)
+            else:
+                os.environ["PYTORCH_ROCM_FAST_SQRT"] = previous
+
+        self.assertEqual(result, reference, equal_nan=True)
+
     exact_dtype = True
 
     @ops(
