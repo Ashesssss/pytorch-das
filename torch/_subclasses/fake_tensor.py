@@ -1361,7 +1361,9 @@ class _DispatchCacheEntryOutputInfo:
     1) The op is inplace, and a hit means we need to alias the argument at a
        given index.
     2) We need to synthesize a new FakeTensor given tensor metadata. For view
-       ops, we further capture the index of the arg to alias.
+       ops, we further capture the index of the arg to alias. For non-view
+       outputs, storage_idx preserves output-output storage aliases and lets
+       us restore a nonzero storage offset on a cache hit.
     3) if the tensor related fields are None, then it is a constant value (e.g.
     None or integer)
     """
@@ -1369,6 +1371,7 @@ class _DispatchCacheEntryOutputInfo:
     inplace_idx: int | None
     metadata: TensorMetadata | None
     view_idx: int | None
+    storage_idx: int | None = None
     constant_value: Any | None = SingletonConstant
 
 
@@ -2018,6 +2021,7 @@ class FakeTensorMode(TorchDispatchMode):
         args: Sequence[object],
         kwargs: Mapping[str, object],
         output: FakeTensor,
+        storage_idx: Optional[int] = None,
     ) -> _DispatchCacheEntryOutputInfo:
         if isinstance(output, (int, torch.SymInt, type(None))):
             return _DispatchCacheEntryOutputInfo(
@@ -2055,6 +2059,7 @@ class FakeTensorMode(TorchDispatchMode):
             inplace_idx=None,
             metadata=metadata,
             view_idx=view_idx,
+            storage_idx=storage_idx,
         )
 
         # N.B.: Some checks for bypassing the cache would be performed on the
@@ -2163,6 +2168,20 @@ class FakeTensorMode(TorchDispatchMode):
                 output,
             )
 
+        output_storage_indices: dict[StorageWeakRef, int] = {}
+
+        def storage_idx_for_output(output: object) -> Optional[int]:
+            # Views already recover their storage from the input.  New outputs
+            # may share a storage with another output (for example, HIP SDPA's
+            # seed/offset scalars), so give each distinct output storage a
+            # stable cache-entry-local index.
+            if not isinstance(output, FakeTensor) or func.is_view:
+                return None
+            storage = StorageWeakRef(output._typed_storage())
+            if storage not in output_storage_indices:
+                output_storage_indices[storage] = len(output_storage_indices)
+            return output_storage_indices[storage]
+
         if isinstance(output, tuple):
             output_infos = [
                 self._get_output_info_for_cache_entry(
@@ -2172,6 +2191,7 @@ class FakeTensorMode(TorchDispatchMode):
                     args,
                     kwargs,
                     out_elem,
+                    storage_idx_for_output(out_elem),
                 )
                 for out_elem in output
             ]
@@ -2189,6 +2209,7 @@ class FakeTensorMode(TorchDispatchMode):
                 args,
                 kwargs,
                 output,
+                storage_idx_for_output(output),
             )
             return _DispatchCacheValidEntry(
                 output_infos=(output_info,), is_output_tuple=False
@@ -2201,6 +2222,7 @@ class FakeTensorMode(TorchDispatchMode):
         key: _DispatchCacheKey,
         func: OpOverload,
         args: Sequence[object],
+        output_storages: dict[int, Any],
     ) -> FakeTensor | None:
         if (
             entry.inplace_idx is None
@@ -2242,8 +2264,11 @@ class FakeTensorMode(TorchDispatchMode):
         shape = tuple(check_value(v, state) for v in metadata.shape)
         stride = tuple(check_value(v, state) for v in metadata.stride)
         storage_offset = check_value(metadata.storage_offset, state)
-        if metadata.storage_bytes is not None:
-            check_value(metadata.storage_bytes, state)
+        storage_bytes = (
+            None
+            if metadata.storage_bytes is None
+            else check_value(metadata.storage_bytes, state)
+        )
 
         maybe_suppress: Callable[[], typing.ContextManager[None]] = (
             contextlib.nullcontext
@@ -2274,6 +2299,21 @@ class FakeTensorMode(TorchDispatchMode):
             storage = view_arg.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
                 empty.set_(storage, storage_offset, shape, stride)
+        elif entry.storage_idx is not None:
+            # Non-view outputs can still be aliases of each other and can have
+            # nonzero storage offsets.  empty_strided() alone always creates a
+            # fresh storage at offset zero, so restore both the storage and the
+            # offset from the cache entry.
+            storage = output_storages.get(entry.storage_idx)
+            if storage is None:
+                assert storage_bytes is not None
+                with in_kernel_invocation_manager(self), maybe_suppress():
+                    storage = torch.empty(
+                        (storage_bytes,), dtype=torch.uint8, device="meta"
+                    ).untyped_storage()
+                output_storages[entry.storage_idx] = storage
+            with in_kernel_invocation_manager(self), maybe_suppress():
+                empty.set_(storage, storage_offset, shape, stride)
 
         return FakeTensor(self, empty, metadata.device)
 
@@ -2289,17 +2329,19 @@ class FakeTensorMode(TorchDispatchMode):
         Create a new FakeTensor from the cache entry.
         """
 
+        output_storages: dict[int, Any] = {}
+
         if entry.is_output_tuple:
             outputs = [
                 self._get_output_tensor_from_cache_entry(
-                    state, output_info, key, func, args
+                    state, output_info, key, func, args, output_storages
                 )
                 for output_info in entry.output_infos
             ]
             return tuple(outputs)
         else:
             return self._get_output_tensor_from_cache_entry(
-                state, entry.output_infos[0], key, func, args
+                state, entry.output_infos[0], key, func, args, output_storages
             )
 
     def _crosscheck_cache_output(
