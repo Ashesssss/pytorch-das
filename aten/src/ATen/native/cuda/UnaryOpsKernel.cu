@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/UnaryOps.h>
 
+#include <cstdlib>
 #include <limits>
 
 #include <ATen/AccumulateType.h>
@@ -158,8 +159,27 @@ void sqrt_kernel_cuda(TensorIteratorBase& iter) {
     #endif
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, common_dtype, "sqrt_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      const bool fast_sqrt = []() {
+        if (const char* e = std::getenv("PYTORCH_ROCM_FAST_SQRT");
+            e && std::atoi(e) != 0) {
+          return true;
+        }
+        return false;
+      }();
+      gpu_kernel(iter, [fast_sqrt] GPU_LAMBDA(scalar_t a) -> scalar_t {
+        #ifdef USE_ROCM
+        if constexpr (!std::is_same<scalar_t, double>::value) {
+          if (fast_sqrt) {
+            float x = static_cast<float>(a);
+            float r;
+            asm volatile("v_sqrt_f32 %0, %1" : "=v"(r) : "v"(x));
+            return static_cast<scalar_t>(r);
+          }
+        }
         return std::sqrt(a);
+        #else
+        return std::sqrt(a);
+        #endif
       });
     });
   }
