@@ -2169,13 +2169,14 @@ class FakeTensorMode(TorchDispatchMode):
             )
 
         output_storage_indices: dict[StorageWeakRef, int] = {}
+        is_view_op = isinstance(func, torch._ops.OpOverload) and func.is_view
 
         def storage_idx_for_output(output: object) -> Optional[int]:
             # Views already recover their storage from the input.  New outputs
             # may share a storage with another output (for example, HIP SDPA's
             # seed/offset scalars), so give each distinct output storage a
             # stable cache-entry-local index.
-            if not isinstance(output, FakeTensor) or func.is_view:
+            if not isinstance(output, FakeTensor) or is_view_op:
                 return None
             storage = StorageWeakRef(output._typed_storage())
             if storage not in output_storage_indices:
