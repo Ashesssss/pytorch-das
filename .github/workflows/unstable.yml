@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: unstable
 
 on:
@@ -20,7 +21,7 @@ jobs:
   # There must be at least one job here to satisfy GitHub action workflow syntax
   introduction:
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
       - name: Introduce PyTorch unstable workflow
@@ -46,7 +47,7 @@ jobs:
 
   get-label-type:
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.13
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.14
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}

@@ -137,7 +137,6 @@ xfail_not_implemented = {
     "aten::pdist",
     "aten::pin_memory",
     "aten::promote_types",
-    "aten::qr.Q",
     "aten::quantile",
     "aten::quantile.scalar",
     "aten::requires_grad_",
@@ -215,7 +214,7 @@ def dispatch_registrations(
     subtests = [
         subtest(
             reg,
-            name=f"[{reg}]",
+            name=f"[{reg}]".replace(".", "_"),
             decorators=([unittest.expectedFailure] if reg in xfails else []),
         )
         for reg in registrations

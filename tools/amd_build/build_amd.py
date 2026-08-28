@@ -199,8 +199,7 @@ for hip_platform_file in hip_platform_files:
             print(f"{hip_platform_file} skipped")
         else:
             with open(hip_platform_file, "w") as sources:
-                for line in newlines:
-                    sources.write(line)
+                sources.writelines(newlines)
             print(f"{hip_platform_file} updated")
 
 # NOTE: MSLK sources needing hipify
@@ -280,8 +279,7 @@ for hipify_v1_to_v2_file in hipify_v1_to_v2_files:
             print(f"{hipify_v1_to_v2_file} skipped")
         else:
             with open(hipify_v1_to_v2_file, "w") as sources:
-                for line in newlines:
-                    sources.write(line)
+                sources.writelines(newlines)
             print(f"{hipify_v1_to_v2_file} updated")
 
 
@@ -317,6 +315,5 @@ if not buck_build:
             do_write = False
     if do_write:
         with open(mslk_move_dst, "w") as dst:
-            for line in src_lines:
-                dst.write(line)
+            dst.writelines(src_lines)
         print(f"{mslk_move_dst} updated")

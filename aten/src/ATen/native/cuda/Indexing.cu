@@ -27,6 +27,7 @@
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/empty_quantized.h>
@@ -870,7 +871,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
       const int warp_size = at::cuda::warp_size();
       dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
            std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
-           std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
+           std::clamp<int>(nElemBefore, 1, at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
 #ifdef USE_ROCM
@@ -915,6 +916,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
           kFloat8_e4m3fnuz,
           kFloat8_e5m2fnuz,
           kComplexHalf,
+          kBComplex32,
           kHalf,
           kBool,
           kBFloat16);
@@ -1003,6 +1005,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
             kFloat8_e4m3fnuz,
             kFloat8_e5m2fnuz,
             kComplexHalf,
+            kBComplex32,
             kHalf,
             kBool,
             kBFloat16);
@@ -1035,6 +1038,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
               kFloat8_e4m3fnuz,
               kFloat8_e5m2fnuz,
               kComplexHalf,
+              kBComplex32,
               kHalf,
               kBool,
               kBFloat16);
@@ -1065,6 +1069,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
             kFloat8_e4m3fnuz,
             kFloat8_e5m2fnuz,
             kComplexHalf,
+            kBComplex32,
             kHalf,
             kBool,
             kBFloat16);
@@ -1129,7 +1134,7 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
       const int warp_size = at::cuda::warp_size();
       dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
            std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
-           std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
+           std::clamp<int>(nElemBefore, 1, at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
       AT_DISPATCH_QINT_TYPES(
@@ -1911,6 +1916,7 @@ Tensor& index_select_out_cuda(
         AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
         AT_EXPAND(AT_FLOAT8_TYPES),
         kComplexHalf,
+        kBComplex32,
         kHalf,
         kBool,
         kBFloat16);
@@ -1937,8 +1943,8 @@ Tensor index_select_quantized_cuda(const Tensor& self, int64_t dim, const Tensor
 namespace {
 
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-      kBool, kHalf, kBFloat16, kComplexHalf, iter.common_dtype(), "masked_fill_", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
+      kBool, kHalf, kBFloat16, kComplexHalf, kBComplex32, iter.common_dtype(), "masked_fill_", [&]() {
         const auto value_ = value.to<scalar_t>();
         gpu_kernel(
             iter, [value_] GPU_LAMBDA(scalar_t self, bool mask) -> scalar_t {
@@ -2090,8 +2096,8 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
     Tensor intrsc_counts_nneg_index;
     Tensor intrsc_first_match_nneg_index;
     std::tie(intrsc_counts_nneg_index, intrsc_first_match_nneg_index) = [&]() -> std::tuple<Tensor, Tensor> {
-      auto intrsc_counts_nneg_index = at::zeros_like(nneg_index);
-      auto intrsc_first_match_nneg_index = at::zeros_like(nneg_index);
+      auto intrsc_counts_nneg_index = at::empty_like(nneg_index);
+      auto intrsc_first_match_nneg_index = at::empty_like(nneg_index);
 
       auto iter = TensorIteratorConfig()
         .add_output(intrsc_first_match_nneg_index)

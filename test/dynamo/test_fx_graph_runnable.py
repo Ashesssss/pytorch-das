@@ -192,7 +192,7 @@ class FxGraphRunnableTest(TestCase):
             self.assertEqual(
                 res.returncode,
                 0,
-                f"Standalone fx_graph_runnable failed:\nSTDERR:\n{res.stderr}",
+                lambda msg: f"{msg}\nStandalone fx_graph_runnable failed:\nSTDERR:\n{res.stderr}",
             )
 
     # basic tests
@@ -200,12 +200,11 @@ class FxGraphRunnableTest(TestCase):
         def f(x):
             return x + 1
 
-        torch.compile(f)(torch.randn(4))
+        torch.compile(f)(torch.randn(4))  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
     @requires_gpu
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_user_defined_triton_kernel_autotune(self):
         if torch.version.hip and not evaluate_gfx_arch_within([*MI350_ARCH]):
             self.skipTest("fp16 atomic_add requires gfx950+")
@@ -225,7 +224,7 @@ class FxGraphRunnableTest(TestCase):
         x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
 
-        torch.compile(add)(x, y)
+        torch.compile(add)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
@@ -240,7 +239,7 @@ class FxGraphRunnableTest(TestCase):
         x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
 
-        torch.compile(add)(x, y)
+        torch.compile(add)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
@@ -257,7 +256,7 @@ class FxGraphRunnableTest(TestCase):
         x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16) * 0.5
 
-        torch.compile(subtract_nested)(x, y)
+        torch.compile(subtract_nested)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
@@ -280,7 +279,7 @@ class FxGraphRunnableTest(TestCase):
         x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16) * 0.5
 
-        torch.compile(f)(x, y)
+        torch.compile(f)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
@@ -312,7 +311,7 @@ class FxGraphRunnableTest(TestCase):
         x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16) * 0.5
 
-        torch.compile(f)(x, y)
+        torch.compile(f)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     def test_two_inputs_matmul(self):
@@ -320,14 +319,14 @@ class FxGraphRunnableTest(TestCase):
             return (a @ b).relu()
 
         a, b = torch.randn(2, 3), torch.randn(3, 4)
-        torch.compile(f)(a, b)
+        torch.compile(f)(a, b)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     def test_scalar_multiply(self):
         def f(x):
             return x * 2
 
-        torch.compile(f)(torch.randn(5))
+        torch.compile(f)(torch.randn(5))  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     # testing dynamic shapes
@@ -339,7 +338,7 @@ class FxGraphRunnableTest(TestCase):
         torch._dynamo.mark_dynamic(a, 0)
         torch._dynamo.mark_dynamic(a, 1)
 
-        torch.compile(f)(a)
+        torch.compile(f)(a)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     def test_broadcast_add_dynamic(self):
@@ -351,7 +350,7 @@ class FxGraphRunnableTest(TestCase):
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(y, 1)
 
-        torch.compile(f)(x, y)
+        torch.compile(f)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     def test_toy_model_basic(self):
@@ -359,7 +358,7 @@ class FxGraphRunnableTest(TestCase):
         model.eval()  # Set to eval mode to avoid dropout randomness
 
         x = torch.randn(3, 8)
-        torch.compile(model)(x)
+        torch.compile(model)(x)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     def test_toy_model_batch_processing(self):
@@ -367,7 +366,7 @@ class FxGraphRunnableTest(TestCase):
         model.eval()
 
         x = torch.randn(16, 12)
-        torch.compile(model)(x)
+        torch.compile(model)(x)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     def test_toy_model_dynamic_batch(self):
@@ -377,7 +376,7 @@ class FxGraphRunnableTest(TestCase):
         x = torch.randn(7, 10)
         torch._dynamo.mark_dynamic(x, 0)
 
-        torch.compile(model)(x)
+        torch.compile(model)(x)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     # Distributed collectives tests with FakeProcessGroup
@@ -395,7 +394,7 @@ class FxGraphRunnableTest(TestCase):
 
         try:
             x = torch.randn(4, 4)
-            torch.compile(f)(x)
+            torch.compile(f)(x)  # noqa: UNSPECIFIED_BACKEND
         finally:
             dist.destroy_process_group()
 
@@ -416,7 +415,7 @@ class FxGraphRunnableTest(TestCase):
 
         try:
             x = torch.randn(3, 3)
-            torch.compile(f)(x)
+            torch.compile(f)(x)  # noqa: UNSPECIFIED_BACKEND
         finally:
             dist.destroy_process_group()
 
@@ -436,7 +435,7 @@ class FxGraphRunnableTest(TestCase):
 
         try:
             x = torch.randn(5, 5)
-            torch.compile(f)(x)
+            torch.compile(f)(x)  # noqa: UNSPECIFIED_BACKEND
         finally:
             dist.destroy_process_group()
 
@@ -458,7 +457,7 @@ class FxGraphRunnableTest(TestCase):
 
         try:
             x = torch.randn(4, 4)
-            torch.compile(f)(x)
+            torch.compile(f)(x)  # noqa: UNSPECIFIED_BACKEND
         finally:
             dist.destroy_process_group()
 
@@ -484,7 +483,7 @@ class FxGraphRunnableTest(TestCase):
         try:
             x = torch.arange(8, dtype=torch.float32)
             y = torch.arange(8, dtype=torch.float32)
-            torch.compile(f)(x, y)
+            torch.compile(f)(x, y)  # noqa: UNSPECIFIED_BACKEND
         finally:
             dist.destroy_process_group()
 
@@ -506,7 +505,7 @@ class FxGraphRunnableTest(TestCase):
             {"trace.enabled": True, "trace.provenance_tracking_level": 1}
         ):
             x = torch.randn(4, 4)
-            torch.compile(f)(x)
+            torch.compile(f)(x)  # noqa: UNSPECIFIED_BACKEND
             self._exec_and_verify_payload()
 
     @torch._dynamo.config.patch(assume_static_by_default=False)
@@ -521,7 +520,7 @@ class FxGraphRunnableTest(TestCase):
             ), torch.ops.aten._adaptive_avg_pool2d(x + 1, (2, 5))
 
         x = torch.randn(2, 4, 16, 16)
-        torch.compile(f)(x)
+        torch.compile(f)(x)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     @torch._dynamo.config.patch(assume_static_by_default=False)
@@ -552,7 +551,7 @@ class FxGraphRunnableTest(TestCase):
         s2 = weights.shape[0]
         view = flat.as_strided((s2, 16), (16, 1))
 
-        torch.compile(f)(view, weights)
+        torch.compile(f)(view, weights)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
     @torch._dynamo.config.patch(assume_static_by_default=False)
@@ -566,7 +565,7 @@ class FxGraphRunnableTest(TestCase):
         repeats = torch.randint(5, 15, (num_segments,), dtype=torch.int64)
         output_size = repeats.sum()
 
-        torch.compile(f, dynamic=True)(data, repeats, output_size)
+        torch.compile(f, dynamic=True)(data, repeats, output_size)  # noqa: UNSPECIFIED_BACKEND
 
         self._exec_and_verify_payload()
 
@@ -588,7 +587,7 @@ class FxGraphRunnableTest(TestCase):
         data = torch.randn(1000, 16)
         repeats = torch.full((num_segments,), 10, dtype=torch.int64)
 
-        torch.compile(f)(data, repeats)
+        torch.compile(f)(data, repeats)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
         payload = self.buffer.getvalue().strip()
         self.assertNotIn("# Fixup: ensure sum(repeats) == output_size", payload)
@@ -647,7 +646,7 @@ class TestFxGraphRunnableMultiProcessGroup(TestCase):
             self.assertEqual(
                 result.returncode,
                 0,
-                f"Generated repro failed to execute:\nSTDERR:\n{result.stderr}",
+                lambda msg: f"{msg}\nGenerated repro failed to execute:\nSTDERR:\n{result.stderr}",
             )
 
         finally:
