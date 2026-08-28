@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: Update viable/strict
 
 on:
@@ -18,12 +19,12 @@ jobs:
     environment: ${{ (github.event_name == 'schedule') && 'mergebot' || '' }}
     steps:
       - name: Update viable/strict
-        uses: pytorch/test-infra/.github/actions/update-viablestrict@release/2.13
+        uses: pytorch/test-infra/.github/actions/update-viablestrict@release/2.14
         id: update_viablestrict
         with:
           repository: pytorch/pytorch
           stable-branch: viable/strict
-          requires: '[\"pull\", \"trunk\", \"lint\"]'
+          requires: '[\"pull\", \"trunk\", \"lint\", \"docs-build\"]'
           secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
           clickhouse-url: ${{ secrets.CLICKHOUSE_URL }}
           clickhouse-username: ${{ secrets.CLICKHOUSE_VIABLESTRICT_USERNAME }}

@@ -129,7 +129,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32)),
+            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32,torch.bfloat16)),
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
         error_inputs_func=error_inputs_fft,
@@ -150,7 +150,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32)),
+            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32,torch.bfloat16)),
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
@@ -196,7 +196,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32)),
+            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32,torch.bfloat16)),
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
@@ -234,7 +234,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32)),
+            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32,torch.bfloat16)),
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=2),
         error_inputs_func=error_inputs_fft,
@@ -265,7 +265,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32)),
+            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32,torch.bfloat16)),
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(2, 2)),
         error_inputs_func=error_inputs_fftn,
@@ -309,7 +309,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32)),
+            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32,torch.bfloat16)),
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(2, 2)),
         error_inputs_func=error_inputs_fftn,
@@ -345,7 +345,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(
-            torch.bool, *(() if TEST_WITH_ROCM else (torch.half,))
+            torch.bool, *(() if TEST_WITH_ROCM else (torch.half,torch.bfloat16))
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
         error_inputs_func=error_inputs_fft,
@@ -365,7 +365,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(
-            torch.bool, *(() if TEST_WITH_ROCM else (torch.half,))
+            torch.bool, *(() if TEST_WITH_ROCM else (torch.half,torch.bfloat16))
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
@@ -388,7 +388,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(
-            torch.bool, *(() if TEST_WITH_ROCM else (torch.half,))
+            torch.bool, *(() if TEST_WITH_ROCM else (torch.half,torch.bfloat16))
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
@@ -420,7 +420,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32)),
+            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32,torch.bfloat16)),
         ),
     ),
     SpectralFuncInfo(
@@ -441,7 +441,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32)),
+            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32,torch.bfloat16)),
         ),
         decorators=[
             DecorateInfo(
@@ -485,7 +485,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32)),
+            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32,torch.bfloat16)),
         ),
         decorators=[
             DecorateInfo(
@@ -524,7 +524,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half,)),
+            *(() if TEST_WITH_ROCM else (torch.half,torch.bfloat16)),
         ),
         check_batched_grad=False,
     ),
@@ -545,7 +545,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(
-            torch.bool, *(() if TEST_WITH_ROCM else (torch.half,))
+            torch.bool, *(() if TEST_WITH_ROCM else (torch.half,torch.bfloat16))
         ),
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -577,7 +577,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archss
         dtypesIfCUDA=all_types_and(
-            torch.bool, *(() if TEST_WITH_ROCM else (torch.half,))
+            torch.bool, *(() if TEST_WITH_ROCM else (torch.half,torch.bfloat16))
         ),
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -609,7 +609,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32)),
+            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32,torch.bfloat16)),
         ),
         check_batched_gradgrad=False,
     ),
@@ -631,7 +631,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32)),
+            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32,torch.bfloat16)),
         ),
         check_batched_gradgrad=False,
         decorators=[
@@ -660,7 +660,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32)),
+            *(() if TEST_WITH_ROCM else (torch.half, torch.complex32,torch.bfloat16)),
         ),
         check_batched_gradgrad=False,
         decorators=[

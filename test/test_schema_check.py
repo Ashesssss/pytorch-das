@@ -515,15 +515,13 @@ class TestSchemaCheckModeOpInfo(JitTestCase):
     @ops(op_db, dtypes=OpDTypes.supported)
     @slowTestIf(IS_WINDOWS)
     def test_schema_correctness(self, device, dtype, op):
-        # Currently torch.equal isn't supported with torch.complex32
+        # Currently torch.equal isn't supported with torch.complex32 or torch.bcomplex32.
         # There's also errors with complex64 and complex128
-        # skip_helper_fp64_onE100(device, dtype)       ###
-        # 调用skip_helper_fp64_onE100
         try:
             skip_helper_fp64_onE100(device, dtype)
         except unittest.SkipTest as e:
             self.skipTest(e)  # 如果辅助函数抛出了SkipTest，则跳过测试
-        if (dtype == torch.complex32):
+        if (dtype in (torch.complex32, torch.bcomplex32)):
             return
         for sample in op.sample_inputs(device, dtype, requires_grad=False):
             with SchemaCheckMode():
