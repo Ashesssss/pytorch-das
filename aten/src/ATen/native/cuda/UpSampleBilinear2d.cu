@@ -712,7 +712,7 @@ static void upsample_bilinear2d_out_cuda_template(
       if (can_use_32bit_index && can_vectorize4 && channels >= 48 &&
           batch <= max_grid_z) {
         upsample_bilinear2d_nhwc_tile_vec_out_frame<4, 128, 4, scalar_t, accscalar_t>
-          <<<dim3(ceil_div(pixel_count, 4), ceil_div(channels, 128), batch), 4 * (128 / 4), 0, stream>>>(
+          <<<dim3(ceil_div(pixel_count, static_cast<int64_t>(4)), ceil_div(channels, 128), batch), 4 * (128 / 4), 0, stream>>>(
             rheight, rwidth, align_corners,
             channels,
             height1,
@@ -724,7 +724,7 @@ static void upsample_bilinear2d_out_cuda_template(
       } else if (can_use_32bit_index && can_vectorize4 && channels < 48 &&
           batch <= max_grid_z) {
         upsample_bilinear2d_nhwc_tile_vec_out_frame<32, 48, 4, scalar_t, accscalar_t>
-          <<<dim3(ceil_div(pixel_count, 32), 1, batch), 32 * (48 / 4), 0, stream>>>(
+          <<<dim3(ceil_div(pixel_count, static_cast<int64_t>(32)), 1, batch), 32 * (48 / 4), 0, stream>>>(
             rheight, rwidth, align_corners,
             channels,
             height1,
