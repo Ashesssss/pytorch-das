@@ -296,9 +296,6 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict([
     ("cudaGraphExec_t", "hipGraphExec_t"),
     ("__nv_bfloat16", "__hip_bfloat16"),
     ("__nv_bfloat162", "__hip_bfloat162"),
-    ("CUfileHandle_t", "hipFileHandle_t"),
-    ("CUfileDescr_t", "hipFileDescr_t"),
-    ("CUfileError_t", "hipFileError_t"),
 ])
 
 CUDA_INCLUDE_MAP = collections.OrderedDict([
@@ -2769,14 +2766,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cuFileWrite", "hipFileWrite"),
     ("cuFileBufRegister", "hipFileBufRegister"),
     ("cuFileBufDeregister", "hipFileBufDeregister"),
-    ("cuFileHandleRegister", "hipFileHandleRegister"),
-    ("cuFileHandleDeregister", "hipFileHandleDeregister"),
-    ("CU_FILE_HANDLE_TYPE_OPAQUE_FD", "hipFileHandleTypeOpaqueFD"),
-    ("CU_FILE_SUCCESS", "hipFileSuccess"),
-    ("IS_CUFILE_ERR", "IS_HIPFILE_ERR"),
-    ("CUFILE_ERRSTR", "HIPFILE_ERRSTR"),
-    ("IS_CUDA_ERR", "IS_HIP_DRV_ERR"),
-    ("cu_err", "hip_drv_err"),
 ])
 
 CUDA_SPECIAL_MAP = collections.OrderedDict([

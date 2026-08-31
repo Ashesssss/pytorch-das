@@ -2376,7 +2376,7 @@ if (rocblas_int8_value != 1){
 
   cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
-  _cublasAdjustLdLevel3(transa, transb, m, n, k, &mat1_ld, &mat2_ld, &result_ld);
+  detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &mat1_ld, &mat2_ld, &result_ld);
 
   const int falpha = 1;
   const int fbeta = 0;
