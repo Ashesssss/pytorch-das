@@ -1,4 +1,4 @@
-﻿// Adapted from interp.cpp from Caffe util by Pauline Luc
+﻿//Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
