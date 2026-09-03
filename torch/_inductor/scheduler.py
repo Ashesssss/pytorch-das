@@ -4249,6 +4249,10 @@ class Scheduler:
         with dynamo_timed("Scheduler.__init__"):
             self._init(nodes)
 
+    @staticmethod
+    def count_kernel_nodes(nodes: Sequence[BaseSchedulerNode]) -> int:
+        return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
+    
     def _init(self, nodes: list[ir.Operation]) -> None:
         self._tiling_memory_cache: dict[tuple[Any, ...], Any] = {}
         super().__init__()
