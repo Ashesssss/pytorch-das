@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
@@ -40,52 +39,8 @@ using namespace at::native::detail;
 static void exec_cufft_plan(
     const CuFFTConfig &config, void* in_data, void* out_data, bool forward) {
   auto& plan = config.plan();
-#if defined(USE_ROCM)
-  auto value_type = config.data_type();
-  if (value_type == kFloat) {
-    switch (config.transform_type()) {
-      case CuFFTTransformType::C2C: {
-        CUFFT_CHECK(hipfftExecC2C(plan, static_cast<hipfftComplex*>(in_data),
-                                  static_cast<hipfftComplex*>(out_data),
-                                  forward ? HIPFFT_FORWARD : HIPFFT_BACKWARD));
-        return;
-      }
-      case CuFFTTransformType::R2C: {
-        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(in_data),
-                                  static_cast<hipfftComplex*>(out_data)));
-        return;
-      }
-      case CuFFTTransformType::C2R: {
-        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(in_data),
-                                  static_cast<hipfftReal*>(out_data)));
-        return;
-      }
-    }
-  } else if (value_type == kDouble) {
-    switch (config.transform_type()) {
-      case CuFFTTransformType::C2C: {
-        CUFFT_CHECK(hipfftExecZ2Z(plan, static_cast<hipfftDoubleComplex*>(in_data),
-                                  static_cast<hipfftDoubleComplex*>(out_data),
-                                  forward ? HIPFFT_FORWARD : HIPFFT_BACKWARD));
-        return;
-      }
-      case CuFFTTransformType::R2C: {
-        CUFFT_CHECK(hipfftExecD2Z(plan, static_cast<hipfftDoubleReal*>(in_data),
-                                  static_cast<hipfftDoubleComplex*>(out_data)));
-        return;
-      }
-      case CuFFTTransformType::C2R: {
-        CUFFT_CHECK(hipfftExecZ2D(plan, static_cast<hipfftDoubleComplex*>(in_data),
-                                  static_cast<hipfftDoubleReal*>(out_data)));
-        return;
-      }
-    }
-  }
-  TORCH_CHECK(false, "hipFFT doesn't support transforms on type: ", value_type);
-#else
   CUFFT_CHECK(cufftXtExec(plan, in_data, out_data,
                           forward ? CUFFT_FORWARD : CUFFT_INVERSE));
-#endif
 }
 
 
@@ -211,6 +166,13 @@ bool has_large_prime_factor(int64_t n) {
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
 const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
                          IntArrayRef dim, bool forward) {
+  // cuFFT rejects zero-element batches with CUFFT_INVALID_SIZE. An empty batch
+  // has nothing to transform, so skip planning/execution and return the output
+  // in its expected (empty) shape.
+  if (out.numel() == 0) {
+    out.resize_(out_sizes, MemoryFormat::Contiguous);
+    return out;
+  }
   const auto ndim = self.dim();
   const int64_t signal_ndim = dim.size();
   const auto batch_dims = ndim - signal_ndim;
