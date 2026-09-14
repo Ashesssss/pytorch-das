@@ -54,9 +54,10 @@ class RocshmemLibFinder:
 
         lib_name = f"librocshmem_device_{arch}.bc"
 
+        rocshmem_home = os.environ.get("ROCSHMEM_HOME")
         search_paths = [
-            os.path.join(os.environ.get("ROCSHMEM_HOME"), "lib64"),
-            os.path.join(os.environ.get("ROCM_PATH"), "rocshmem", "rocshmem_dir", "lib64"),
+            os.path.join(rocshmem_home, "lib64") if rocshmem_home else None,
+            "/opt/rocmshmem/lib64",
             os.path.join(sysconfig.get_path("purelib"), "amd", "rocshmem", "lib"),
             "/opt/rocm/lib",
             "/usr/local/lib",
