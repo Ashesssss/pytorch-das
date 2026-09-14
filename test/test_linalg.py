@@ -10151,9 +10151,9 @@ class TestLinalgCudaOnly(TestCase):
             # Check for rocBLAS and hipBLASLt
             self.assertTrue("ROCBLAS_VERSION" in validators)
             # format: [major].[minor].[patch].[tweak].[commit id]
-            self.assertTrue(re.match(r'^\d+[a-z0-9.]+$', validators["ROCBLAS_VERSION"]))
+            self.assertTrue(re.match(r'^\d+[a-z0-9.]+(?:-dirty)?$', validators["ROCBLAS_VERSION"]))
             self.assertTrue("HIPBLASLT_VERSION" in validators)
-            self.assertTrue(re.match(r'^\d+-[a-z0-9]+$', validators["HIPBLASLT_VERSION"]))
+            self.assertTrue(re.match(r'^\d+-[a-z0-9]+(?:-dirty)?$', validators["HIPBLASLT_VERSION"]))
 
     @skipIfRocm
     @dtypes(torch.float)
