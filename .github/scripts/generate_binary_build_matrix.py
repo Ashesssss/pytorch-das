@@ -24,7 +24,7 @@ SCRIPT_DIR = Path(__file__).absolute().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
-CUDA_ARCHES = ["12.6", "12.9", "13.0", "13.2"]
+CUDA_ARCHES = ["13.0", "13.2", "13.4"]
 CUDA_STABLE = "13.0"
 # Only consumed by generate_docker_release_matrix.py, whose Dockerfile installs
 # an already-published torch nightly. A CUDA version belongs here only once its
@@ -33,18 +33,25 @@ CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "13.0": "13.0.3",
     "13.2": "13.2.1",
+    "13.4": "13.4.0",
 }
+# CUDA versions that can only produce the runtime docker image. The devel image
+# apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo, which carries
+# 13-0 through 13-3 only: 13.4 is still a release candidate (13.4.0rc1). The
+# runtime image just pip-installs the published cu134 nightly, so it builds.
+# Drop an entry once its toolkit ships in the apt repo.
+CUDA_ARCHES_RUNTIME_IMAGE_ONLY = ["13.4"]
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
-    "12.9": "9",
     "13.0": "9",
     "13.2": "9",
+    "13.4": "9",
 }
 
 # CUDA versions without a Windows installer on the ossci-windows bucket yet.
-CUDA_ARCHES_NO_WINDOWS: list[str] = []
+CUDA_ARCHES_NO_WINDOWS = ["13.4"]
 
-ROCM_ARCHES = ["7.2", "7.14"]
+ROCM_ARCHES = ["7.14", "10.0"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -53,40 +60,39 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 CPU_S390X_ARCH = ["cpu-s390x"]
 
 CUDA_AARCH64_ARCHES = [
-    "12.6-aarch64",
-    "12.9-aarch64",
     "13.0-aarch64",
     "13.2-aarch64",
+    "13.4-aarch64",
 ]
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
-    "12.6": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvtx]==12.6.3; platform_system == 'Linux' | "
-        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
-        "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
-        "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux'"
-    ),
     "13.0": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     "13.2": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
+    ),
+    "13.4": (
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.0rc1; platform_system == 'Linux' | "
+        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
+        "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
+        "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     # dependency on latest patch version for (major, minor)
     "7.14": ("rocm[libraries,device-all]==7.14.*"),
+    "10.0": ("rocm[libraries,device-all]==10.0.*"),
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.0 | "
         "intel-cmplr-lib-ur==2026.1.0 | "
@@ -310,24 +316,6 @@ WHEEL_CONTAINER_IMAGES = {
     "cpu-s390x": "manylinuxs390x-builder:cpu-s390x",
 }
 
-# RELEASE-ONLY: pin the manywheel builder images to a fixed build so the release
-# uses a reproducible toolchain instead of main's floating tags. The suffix is
-# the .ci/docker tree hash (`git rev-parse HEAD:.ci/docker`), i.e. the same tag
-# .github/actions/binary-docker-build publishes. Only linux manywheel builds run
-# inside these containers, so only those images are pinned. s390x is excluded:
-# its builder images are built locally on self-hosted runners and never published
-# to docker.io under the pinned tag, so pinning it breaks the image pull.
-DOCKER_IMAGE_PIN = "78e737ad29420ffc4800e677c51e2a852caf8359"
-MANYWHEEL_OSES = ("linux", "linux-aarch64")
-
-
-def wheel_container_image_tag_prefix(arch_version: str, os: str) -> str:
-    tag_prefix = WHEEL_CONTAINER_IMAGES[arch_version].split(":")[1]
-    if os in MANYWHEEL_OSES:
-        return f"{tag_prefix}-{DOCKER_IMAGE_PIN}"
-    return tag_prefix
-
-
 RELEASE = "release"
 DEBUG = "debug"
 
@@ -463,7 +451,7 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["13.2", "13.0", "12.9", "12.6"]
+                arch_version in ["13.4", "13.2", "13.0"]
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
@@ -477,9 +465,9 @@ def generate_wheels_matrix(
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
                             ":"
                         )[0],
-                        "container_image_tag_prefix": wheel_container_image_tag_prefix(
-                            arch_version, os
-                        ),
+                        "container_image_tag_prefix": WHEEL_CONTAINER_IMAGES[
+                            arch_version
+                        ].split(":")[1],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS[
@@ -508,9 +496,9 @@ def generate_wheels_matrix(
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
                             ":"
                         )[0],
-                        "container_image_tag_prefix": wheel_container_image_tag_prefix(
-                            arch_version, os
-                        ),
+                        "container_image_tag_prefix": WHEEL_CONTAINER_IMAGES[
+                            arch_version
+                        ].split(":")[1],
                         "package_type": package_type,
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                             ".", "_"

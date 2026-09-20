@@ -57,7 +57,6 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     clone_input_helper,
     first_sample,
-    getRocmVersion,
     HardwareClassification,
     IS_CI,
     IS_FBCODE,
@@ -72,7 +71,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     skipIfTorchInductor,
     suppress_warnings,
-    TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
     TEST_WITH_UBSAN,
@@ -162,25 +160,14 @@ def skip_refs_float_power(device, op):
                 raise unittest.SkipTest(f"{op.name} are not supported on HCU K100_AI.")
 ###
 meta_consistency_out_dtype_mismatch_xfails = {
-    xfail("all"),
-    xfail("amax"),
-    xfail("amin"),
-    xfail("any"),
     xfail("bucketize"),
-    xfail("conj_physical"),
     xfail("cross"),
     xfail("cummax"),
     xfail("cummin"),
     xfail("diag"),
-    xfail("fft.ihfft2"),
-    xfail("fft.ihfftn"),
-    xfail("frexp"),
     xfail("geqrf"),
     xfail("heaviside"),
     xfail("histc"),
-    xfail("index_add"),
-    xfail("index_copy"),
-    xfail("index_select"),
     xfail("isin"),
     xfail("kthvalue"),
     xfail("lerp"),
@@ -206,7 +193,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("mode"),
     xfail("msort"),
     xfail("multinomial"),
-    xfail("nan_to_num"),
     xfail("native_batch_norm"),
     xfail("neg"),
     xfail("nn.functional.avg_pool3d"),
@@ -230,8 +216,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("sort"),
     xfail("sparse.sampled_addmm"),
     xfail("take"),
-    xfail("tril"),
-    xfail("triu"),
     xfail("unfold_copy"),
     # Output has dynamic shape.
     # Does not have a meta kernel implementation.
@@ -489,9 +473,6 @@ class TestCommon(TestCase):
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
     # skip windows case on CPU due to https://github.com/pytorch/pytorch/issues/129947
-    # XPU test will be enabled step by step. Skip the tests temporarily.
-    # MPS does not support double precision, so single precision has to be used instead.
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
@@ -550,7 +531,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -815,7 +795,6 @@ class TestCommon(TestCase):
         op.op = partial(make_traced(op.op), executor=executor)
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
-    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
@@ -827,7 +806,6 @@ class TestCommon(TestCase):
                 out = op(si.input, *si.args, **si.kwargs)
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
-    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
@@ -851,7 +829,6 @@ class TestCommon(TestCase):
                 out = op(si.input, *si.args, **si.kwargs)
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
-    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
@@ -879,7 +856,6 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
-    @skipXPU
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
@@ -973,7 +949,6 @@ class TestCommon(TestCase):
     #   incorrectly sized out parameter warning properly yet
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
-    @skipXPU
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_out_warning(self, device, op):
         if TEST_WITH_TORCHDYNAMO and op.name == "_refs.clamp":
@@ -1038,10 +1013,10 @@ class TestCommon(TestCase):
                 return tuple(t.stride() for t in out)
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
-            # NOTE: only extracts on the CPU and CUDA device types since some
+            # NOTE: only extracts on the CPU and CUDA/XPU device types since some
             #   device types don't have storage
             def _extract_data_ptrs(out):
-                if self.device_type != "cpu" and self.device_type != "cuda":
+                if self.device_type not in ["cpu", "cuda", "xpu"]:
                     return ()
 
                 if isinstance(out, torch.Tensor):
@@ -1170,10 +1145,10 @@ class TestCommon(TestCase):
                 return tuple(t.stride() for t in out)
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
-            # NOTE: only extracts on the CPU and CUDA device types since some
+            # NOTE: only extracts on the CPU and CUDA/XPU device types since some
             #   device types don't have storage
             def _extract_data_ptrs(out):
-                if self.device_type != "cpu" and self.device_type != "cuda":
+                if self.device_type not in ["cpu", "cuda", "xpu"]:
                     return ()
 
                 if isinstance(out, torch.Tensor):
@@ -1322,7 +1297,6 @@ class TestCommon(TestCase):
                     with self.assertRaises(exc_type, msg=msg_fail):
                         op_out(out=out)
 
-    @skipXPU
     @ops(
         [
             op
@@ -1361,7 +1335,6 @@ class TestCommon(TestCase):
         with self.assertRaises(RuntimeError, msg=msg), maybe_skip_size_asserts(op):
             op(sample.input, *sample.args, **sample.kwargs, out=out)
 
-    @skipXPU
     @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
         skip_helper_fp64_onE100(device, dtype)   ###
@@ -1406,7 +1379,6 @@ class TestCommon(TestCase):
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
     #   against eager's gold standard op function variant
-    @skipXPU
     @_variant_ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
         skip_helper_fp64_onE100(device, dtype)    ###
@@ -1588,7 +1560,6 @@ class TestCommon(TestCase):
 
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
-    @skipXPU
     @ops(op_db, allowed_dtypes=(torch.complex32,))
     def test_complex_half_reference_testing(self, device, dtype, op):
         skip_helper_fp64_onE100(device, dtype)       ###
@@ -1633,7 +1604,6 @@ class TestCommon(TestCase):
             # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
-    @skipXPU
     @skipMPS
     @ops(op_db, allowed_dtypes=(torch.bool,))
     def test_non_standard_bool_values(self, device, dtype, op):
@@ -1668,12 +1638,6 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
-        if (
-            TEST_WITH_ROCM
-            and getRocmVersion() >= (7, 14)
-            and op.name == "sparse.sampled_addmm"
-        ):
-            self.skipTest("stale sparse.sampled_addmm OpInfo dtypes on ROCm 7.14")
         # Check complex32 support only if the op claims.
         # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.
         device_type = torch.device(device).type
@@ -1877,7 +1841,6 @@ class TestCommon(TestCase):
         self.fail(msg)
 
     # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
-    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
@@ -2103,6 +2066,7 @@ class TestCompositeCompliance(TestCase):
             skip("topk", variant_name="cutedsl_optimized_deterministic"),
         }
     )
+    @skipXPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
@@ -2864,6 +2828,7 @@ fake_autocast_device_skips = defaultdict(dict)
 # TODO: investigate/fix
 fake_autocast_device_skips["cpu"] = {"linalg.pinv"}
 fake_autocast_device_skips["cuda"] = {"linalg.pinv", "pinverse"}
+fake_autocast_device_skips["xpu"] = {"linalg.pinv", "pinverse"}
 
 
 dynamic_output_op_tests = (
@@ -3137,6 +3102,9 @@ class TestFakeTensor(TestCase):
         self._test_fake_helper(device, dtype, op, context_fn)
 
     def _test_fake_crossref_helper(self, device, dtype, op, context):
+        if "xpu" in device and ("fft" in op.name):
+            self.skipTest("Skip on XPU for torch-xpu-ops/issues/3599")
+
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for sample in samples:
@@ -3243,12 +3211,12 @@ class TestForwardADWithScalars(TestCase):
 instantiate_device_type_tests(
     TestCommon, globals(), allow_xpu=True, allow_mps=MACOS_VERSION >= 15.0
 )
-instantiate_device_type_tests(TestCompositeCompliance, globals())
-instantiate_device_type_tests(TestMathBits, globals())
+instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestMathBits, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
-instantiate_device_type_tests(TestFakeTensor, globals())
+instantiate_device_type_tests(TestFakeTensor, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTags, globals(), only_for="cpu")
-instantiate_device_type_tests(TestForwardADWithScalars, globals())
+instantiate_device_type_tests(TestForwardADWithScalars, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True

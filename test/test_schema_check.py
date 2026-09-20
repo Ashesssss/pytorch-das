@@ -7,15 +7,20 @@ import torch
 from torch.utils._pytree import tree_map
 import unittest
 
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    slowTestIf,
+    TEST_WITH_ROCM,
+    TEST_WITH_TORCHDYNAMO,
+)
 from torch.fx.operator_schemas import normalize_function
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import skipIfRocm,TEST_WITH_ROCM          ###
 from torch.testing._internal.common_device_type import ops, OpDTypes, instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_WINDOWS, slowTestIf
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
@@ -49,18 +54,16 @@ custom_lib_meta.impl("output_is_input", output_is_input)
 # This TorchDispatchTensor Subclass is used to simulate an incorrect schema
 # which is then used to test that SchemaCheckMode behaves as expected
 
-###
-def skip_helper_fp64_onE100(device, dtype):
-    device_type = torch.device(device).type
-    if dtype not in (torch.float64, torch.complex128,torch.double,torch.cdouble):
+def skip_fp64_on_unsupported_rocm_device(device, dtype):
+    device = torch.device(device)
+    if not TEST_WITH_ROCM or device.type != "cuda":
+        return
+    if dtype not in (torch.float64, torch.complex128):
         return
 
-    if TEST_WITH_ROCM:
-        if device_type == 'cuda':
-            device_name=torch.cuda.get_device_properties(torch.cuda.current_device()).name
-            if "K100_AI" in device_name or "K500" in device_name:
-                raise unittest.SkipTest("fp64 are not supported on K100_AI or K500")
-###
+    device_name = torch.cuda.get_device_properties(device).name
+    if "K100_AI" in device_name or "K500" in device_name:
+        raise unittest.SkipTest("FP64 is not supported on K100_AI or K500")
 
 class IncorrectAliasTensor(torch.Tensor):
     ALIAS_ARG_OUT = {"aten::add"}
@@ -112,6 +115,8 @@ class IncorrectAliasTensor(torch.Tensor):
 
 # Tests various schema checking functionalities.
 class TestSchemaCheck(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         if TEST_WITH_TORCHDYNAMO:
             self.skipTest("SchemaCheckMode is ignored by dynamo")
@@ -511,23 +516,21 @@ class TestSchemaCheck(JitTestCase):
             x.add(x)
 
 class TestSchemaCheckModeOpInfo(JitTestCase):
-    #@skipIfRocm                                      ###
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops(op_db, dtypes=OpDTypes.supported)
     @slowTestIf(IS_WINDOWS)
     def test_schema_correctness(self, device, dtype, op):
         # Currently torch.equal isn't supported with torch.complex32 or torch.bcomplex32.
         # There's also errors with complex64 and complex128
-        try:
-            skip_helper_fp64_onE100(device, dtype)
-        except unittest.SkipTest as e:
-            self.skipTest(e)  # 如果辅助函数抛出了SkipTest，则跳过测试
+        skip_fp64_on_unsupported_rocm_device(device, dtype)
         if (dtype in (torch.complex32, torch.bcomplex32)):
             return
         for sample in op.sample_inputs(device, dtype, requires_grad=False):
             with SchemaCheckMode():
                 op(sample.input, *sample.args, **sample.kwargs)
 
-instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals())
 
 if __name__ == '__main__':
     run_tests()

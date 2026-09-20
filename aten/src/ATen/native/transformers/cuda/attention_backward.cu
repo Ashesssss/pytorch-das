@@ -5,6 +5,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -252,8 +253,9 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
         is_nested || query.size(2) != 1 || !sdp::is_cudnn_attention_decode_disabled(),
         "cuDNN SDPA decode is disabled for cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x.");
     TORCH_CHECK(
-        !is_nested || max_q > 128,
-        "cuDNN varlen attention does not support query sequence length <= 128.");
+        !is_nested || max_q > 128 ||
+            at::detail::getCUDAHooks().versionRuntimeCuDNN() >= 92400,
+        "cuDNN varlen attention requires cuDNN >= 9.24 for query sequence length <= 128.");
 
     if (!is_nested) {
       const int64_t batch_size = query.size(0);
@@ -478,6 +480,16 @@ _efficient_attention_backward(
   int64_t K = query.size(3);
   int64_t Kv = value.size(3);
 
+  // Local windows can fully mask rows. Without a window, shared cumulative
+  // metadata proves packed Q/K lengths match without reading them from device.
+  const bool may_have_fully_masked_rows =
+      window_size.value_or(0) > 0 ||
+      (custom_mask_type ==
+           static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) &&
+       (cu_seqlens_q.has_value()
+            ? !cu_seqlens_q->is_same(*cu_seqlens_k)
+            : max_seqlen_q > max_seqlen_k));
+
   at::Tensor grad_q, grad_k, grad_v, grad_bias;
   if (shared_storage_dqdkdv) {
     TORCH_CHECK(
@@ -495,10 +507,10 @@ _efficient_attention_backward(
       " query tokens and ", key.size(1), " key/value tokens"
     );
     TORCH_CHECK(
-      query.size(3) == key.size(3),
+      query.size(3) == key.size(3) && query.size(3) == value.size(3),
       "`shared_storage_dqdkdv` is only supported when Q/K/V "
       "have the same embed dim: got ", query.size(3),
-      " for Q, and ", key.size(3), " for K"
+      " for Q, ", key.size(3), " for K, and ", value.size(3), " for V"
     );
     at::Tensor chunk = at::empty({B, M, 3, nH, K}, query.options());
     grad_q = chunk.select(2, 0);
@@ -508,6 +520,9 @@ _efficient_attention_backward(
     grad_q = at::empty(query.sizes(), query.options());
     grad_k = at::empty(key.sizes(), key.options());
     grad_v = at::empty(value.sizes(), value.options());
+  }
+  if (may_have_fully_masked_rows) {
+    grad_q.zero_();
   }
 
   at::Tensor grad_k_expanded = grad_k;
@@ -641,7 +656,6 @@ _efficient_attention_backward(
     const auto lse_batch_size =
         cu_seqlens_q.has_value() ? cu_seqlens_q->size(0) - 1 : B;
     at::Tensor softmax_lse = logsumexp.view({lse_batch_size * nH, max_seqlen_q});
-    hipError_t err;
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::cast_dtype;
@@ -696,10 +710,11 @@ _efficient_attention_backward(
     }
     aotriton::v3::flash::attn_options opts;
     opts.deterministic = deterministic;
-    err = aotriton::v3::flash::attn_bwd(params,
-                                        aotriton::v3::flash::attn_bwd_params::kVersion,
-                                        stream,
-                                        &opts);
+    AT_CUDA_CHECK(aotriton::v3::flash::attn_bwd(
+        params,
+        aotriton::v3::flash::attn_bwd_params::kVersion,
+        stream,
+        &opts));
 #else  // DISABLE_AOTRITON
     TORCH_CHECK(false, "Attempting to use aotriton mem_eff_backward backend in a build that has not built AOTriton");
 #endif
@@ -1006,20 +1021,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
 
-  auto* v = std::getenv("USE_FA_BHSD");
-  Tensor q_t = query;
-  Tensor k_t = key;
-  Tensor v_t = value;
-  Tensor grad_out_t = grad_out_;
-  Tensor out_t = out;
-  if(v && std::string(v) == "1"){}
-  else {
-    q_t = query.transpose(1, 2);
-    k_t = key.transpose(1, 2);
-    v_t = value.transpose(1, 2);
-    grad_out_t = grad_out_.transpose(1,2);
-    out_t = out.transpose(1,2);
-  }
+  Tensor q_t = query.transpose(1, 2);
+  Tensor k_t = key.transpose(1, 2);
+  Tensor v_t = value.transpose(1, 2);
+
+  Tensor grad_out_t = grad_out_.transpose(1,2);
+  Tensor out_t = out.transpose(1,2);
 
   auto [grad_q, grad_k, grad_v] = at::_flash_attention_backward(
     grad_out_t,
@@ -1038,12 +1045,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     philox_offset,
     scale);
 
-  if(v && std::string(v) == "1"){}
-  else{
-    grad_q = grad_q.transpose(1,2);
-    grad_k = grad_k.transpose(1,2);
-    grad_v = grad_v.transpose(1,2);
-  }
+  grad_q = grad_q.transpose(1,2);
+  grad_k = grad_k.transpose(1,2);
+  grad_v = grad_v.transpose(1,2);
 
   return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v));
 }

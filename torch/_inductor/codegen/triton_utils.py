@@ -1,10 +1,13 @@
 # mypy: allow-untyped-defs
+import functools
+import warnings
 from typing import Any
-import re
+
 import sympy
 
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._triton import has_triton_block_ptr
 
 from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper, DeviceProperties
@@ -25,7 +28,36 @@ from .common import (
     WorkspaceArg,
 )
 
-MAX_BYTES = 2**31 - 1
+
+@functools.cache
+def _warn_block_ptr_unavailable() -> None:
+    # Fires only in the no-op case (flag on, API gone), so users who never set
+    # the flag -- and callers that patch it to False -- stay quiet.
+    warnings.warn(
+        "config.triton.use_block_ptr=True but the installed Triton no longer "
+        "provides the block-pointer frontend API (removed in "
+        "triton-lang/triton#10833); falling back to the default masked-indexing "
+        "path. This flag is deprecated and will be removed (#191012).",
+        FutureWarning,
+        stacklevel=2,
+    )
+
+
+def use_block_ptr_enabled() -> bool:
+    """Effective block-pointer codegen setting.
+
+    Honors ``config.triton.use_block_ptr`` only where the installed Triton still
+    provides the block-pointer frontend API. When the flag is set but the API is
+    gone the request is a no-op: warn once, then fall back to masked indexing.
+    """
+    if not config.triton.use_block_ptr:
+        return False
+    if has_triton_block_ptr():
+        return True
+    _warn_block_ptr_unavailable()
+    return False
+
+
 def should_unwrap_unspec_arg(name: str):
     if V.graph.is_unspec_arg(name):
         # Unwrap on all devices except CPU
@@ -62,7 +94,13 @@ def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
     return DeviceProperties.create(device).cc < 89
 
 
-def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
+def signature_of(
+    arg: KernelArgType,
+    *,
+    size_dtype: str | None,
+    use_fp64_for_python_float: bool = True,
+) -> str:
+    """Return the Triton signature type for an Inductor kernel argument."""
     if isinstance(arg, TensorArg):
         typ = _type_of(arg.dtype)
         if should_unwrap_unspec_arg(arg.buffer):
@@ -92,18 +130,25 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
             # it should be marked as "constexpr" in the signature.
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
-            # Python floats are natively fp64, so use fp64 to preserve precision
-            if config._use_fp64_for_unbacked_floats and device_supports_fp64(
-                V.graph.current_device
+            # Inductor-generated kernels use fp64 to preserve Python-float
+            # precision. User-defined Triton kernels opt out so their compiled
+            # signatures match Triton's eager specialization.
+            if (
+                use_fp64_for_python_float
+                and config._use_fp64_for_unbacked_floats
+                and device_supports_fp64(V.graph.current_device)
             ):
                 return "fp64"
             return "fp32"
         elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
             arg.expr, (SymT.UNBACKED_FLOAT)
         ):
-            # Unbacked floats from .item() should preserve fp64 precision
-            if config._use_fp64_for_unbacked_floats and device_supports_fp64(
-                V.graph.current_device
+            # Unbacked floats from .item() are runtime Python floats, so they
+            # follow the same eager-vs-Inductor signature policy as literals.
+            if (
+                use_fp64_for_python_float
+                and config._use_fp64_for_unbacked_floats
+                and device_supports_fp64(V.graph.current_device)
             ):
                 return "fp64"
             return "fp32"
@@ -178,6 +223,7 @@ def signature_to_meta(
     argdefs: list[ArgName],
     indices: list[int] | None = None,
     is_template: bool = False,
+    use_fp64_for_python_float: bool = True,
 ) -> dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
@@ -187,16 +233,17 @@ def signature_to_meta(
         # risky to use tl.int32 dtype since we may have ks0*ks1 later
         # for kernels like torch.mean when dynamic shape is enabled.
         #
-        # Check config.triton.use_block_ptr, since Triton block pointer
-        # does not support 64bit indexing:
-        # https://gist.github.com/shunting314/6a41c776171720ce4561f202dcde0ad6
+        # Block pointers do not support 64-bit indexing, so keep ks indices in
+        # tl.int32 whenever the (deprecated) block-pointer path is actually
+        # active. Templates like flex attention/decoding likewise use
+        # hand-written block pointers, so they also stay on 32-bit ks indexing.
         #
-        # If the triton metadata is for a template, don't use tl.int64 index.
-        # Templates like flex attention/decoding uses block pointers which
-        # does not support 64 bit indexing.
+        # assume_32bit_indexing already asserts (and guards) that every ks* symbol
+        # fits in int32.
         if (
-            not config.triton.use_block_ptr
-            and not is_template
+            not is_template
+            and not use_block_ptr_enabled()
+            and not config.assume_32bit_indexing
             and isinstance(arg, SizeArg)
             and arg.name.startswith("ks")
         ):
@@ -204,7 +251,11 @@ def signature_to_meta(
         return size_dtype
 
     return {
-        argdefs[i].name: signature_of(arg, size_dtype=_decide_tl_dtype(arg))
+        argdefs[i].name: signature_of(
+            arg,
+            size_dtype=_decide_tl_dtype(arg),
+            use_fp64_for_python_float=use_fp64_for_python_float,
+        )
         for i, arg in zip(indices, signature)
     }
 
@@ -297,24 +348,6 @@ def _is_tensor_within_2gb(arg: TensorArg) -> bool:
     except Exception:
         return False
 
-def parse_operator_integers(text) -> int:
-    from functools import reduce
-    """
-    排除字母后和比较符后的数字。
-    """
-    pattern = r'(?<=[*])\d+'
-    matches = re.findall(pattern, text)
-    first_match = re.match(r'^\d+', text)
-    results = []
-    if first_match:
-        results.append(int(first_match.group()))
-    results.extend([int(m) for m in list(matches)])
-    if results:
-        return reduce(lambda x, y: x * y, results)
-    else:
-        # 1 represent false
-        return 1
-
 def config_of(
     args: list[KernelArgType],
     *,
@@ -348,9 +381,6 @@ def config_of(
                 return False
             if isinstance(x.expr, (float, bool)):
                 return False
-            if isinstance(x.expr, sympy.Mul):
-                val = parse_operator_integers(str(x.expr))
-                return V.graph.sizevars.statically_known_multiple_of(val, alignment)
             return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)  # type: ignore[arg-type]
         if isinstance(x, WorkspaceArg):
             # We allocate the workspace ourselves, so it is always aligned
@@ -394,19 +424,18 @@ def config_of(
     # can use 32-bit pointer offsets and emit buffer load/store ops.
     if pointer_range_override is not None:
         pointer_range_32 = pointer_range_override
-    elif torch.version.hip is not None:
-        if config.force_use_pointer_range:
-            pointer_range_32 = tuple(
+    elif torch.version.hip is not None and config.force_use_pointer_range:
+        pointer_range_32 = tuple(
             i
             for i, arg in zip(indices, args)
             if isinstance(arg, TensorArg)
         )
-        else:
-            pointer_range_32 = tuple(
-                i
-                for i, arg in zip(indices, args)
-                if isinstance(arg, TensorArg) and _is_tensor_within_2gb(arg)
-            )
+    elif torch.version.hip is not None and config.triton.emit_pointer_range_32:
+        pointer_range_32 = tuple(
+            i
+            for i, arg in zip(indices, args)
+            if isinstance(arg, TensorArg) and _is_tensor_within_2gb(arg)
+        )
     else:
         pointer_range_32 = ()
 

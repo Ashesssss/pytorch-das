@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from auditwheel.wheeltools import add_platforms, InWheelCtx
+from build_env_setup import PLATFORM_TAGS
 
 
 PATCHELF = "/usr/local/bin/patchelf"
@@ -92,7 +93,6 @@ def cuda_rpaths(gpu_arch_version: str) -> str:
         + ":$ORIGIN/../../nvidia/cuda_nvrtc/lib"
         + ":$ORIGIN/../../nvidia/cuda_runtime/lib"
         + ":$ORIGIN/../../nvidia/cufft/lib"
-        + ":$ORIGIN/../../nvidia/curand/lib"
         + ":$ORIGIN/../../nvidia/cusolver/lib"
         + ":$ORIGIN/../../nvidia/cusparse/lib"
         + ":$ORIGIN/../../cusparselt/lib"
@@ -101,34 +101,48 @@ def cuda_rpaths(gpu_arch_version: str) -> str:
     )
 
 
-def rocm_rpaths() -> str:
+def rocm_rpaths(rocm_home: Path | None = None) -> str:
     """RPATH list for the TheRock wheel-based ROCm layout.
 
-    ROCm libs come from the `rocm` pip package, which unpacks under
-    <site-packages>/_rocm_sdk_core (a sibling of torch/), so point at it
-    $ORIGIN-relatively, mirroring cuda_rpaths(). No ROCm libs are bundled into
-    the wheel in this layout.
+    ROCm packages are siblings of torch, so paths are ``$ORIGIN``-relative.
+    Include flat and discovered per-target LLVM paths for ``libomp.so`` across
+    TheRock package layouts.
     """
-    return (
-        "$ORIGIN/../../_rocm_sdk_core/lib"
-        ":$ORIGIN/../../_rocm_sdk_core/lib/rocm_sysdeps/lib"
-        ":$ORIGIN/../../_rocm_sdk_libraries/lib"
-    )
+    rpaths = [
+        "$ORIGIN/../../_rocm_sdk_core/lib",
+        "$ORIGIN/../../_rocm_sdk_core/lib/rocm_sysdeps/lib",
+        "$ORIGIN/../../_rocm_sdk_libraries/lib",
+        "$ORIGIN/../../_rocm_sdk_core/lib/llvm/lib",
+    ]
+    if rocm_home is None:
+        env_home = os.environ.get("ROCM_HOME")
+        if env_home:
+            rocm_home = Path(env_home)
+    if rocm_home is not None:
+        llvm_lib = rocm_home / "lib" / "llvm" / "lib"
+        for libomp in sorted(llvm_lib.glob("*/libomp.so")):
+            if libomp.is_file():
+                rpaths.append(
+                    f"$ORIGIN/../../_rocm_sdk_core/lib/llvm/lib/{libomp.parent.name}"
+                )
+    return ":".join(rpaths)
 
 
-def aarch64_extra_deps(use_cuda: bool) -> list[Path]:
-    """Libraries to bundle into torch/lib/ on aarch64.
-
-    CPU builds link against OpenBLAS + libgfortran; CUDA builds link against
-    NVPL. Both pick up ARM Compute Library (ACL) for oneDNN acceleration.
+def arch_extra_deps(arch: str, use_cuda: bool) -> list[Path]:
     """
-    deps: list[Path] = []
+    CPU builds link against OpenBLAS + libgfortran
+    CUDA builds link against NVPL.
+    """
     candidates: list[Path] = [Path("/usr/lib64/libgfortran.so.5")]
-    if Path("/acl/build").is_dir():
-        candidates += [
-            Path("/acl/build/libarm_compute.so"),
-            Path("/acl/build/libarm_compute_graph.so"),
-        ]
+    if arch == "aarch64":
+        # Both CPU and CUDA builds pick up ARM Compute Library (ACL) for
+        # oneDNN acceleration on AArch64.
+        if Path("/acl/build").is_dir():
+            candidates += [
+                Path("/acl/build/libarm_compute.so"),
+                Path("/acl/build/libarm_compute_graph.so"),
+            ]
+
     if use_cuda:
         candidates += [
             Path(f"/usr/local/lib/{name}")
@@ -141,7 +155,8 @@ def aarch64_extra_deps(use_cuda: bool) -> list[Path]:
         ]
     else:
         candidates.append(Path("/opt/OpenBLAS/lib/libopenblas.so.0"))
-    deps = [p for p in candidates if p.is_file()]
+
+    deps: list[Path] = [p for p in candidates if p.is_file()]
     return deps
 
 
@@ -352,7 +367,7 @@ def repair_wheel(
     output_dir: Path,
     platform_tag: str,
     libgomp_path: Path,
-    aarch64_deps: list[Path],
+    arch_deps: list[Path],
     bundled_libs: list[BundledLib],
     aux_files: list[AuxFile],
     c_so_rpath: str,
@@ -379,7 +394,7 @@ def repair_wheel(
                 )
 
         # Bundle aarch64 BLAS/LAPACK/ACL dependencies (no-op on x86)
-        for dep in aarch64_deps:
+        for dep in arch_deps:
             shutil.copy(dep, torch_lib / dep.name)
 
         # TODO: Remove when switching to ROCm wheels
@@ -471,7 +486,7 @@ def main() -> None:
             # TheRock wheel layout (rocm7.14): ROCm ships as the `rocm` pip
             # package (_rocm_sdk_core, a sibling of torch/). Resolve libs via
             # RPATH instead of bundling them, mirroring the CUDA/XPU wheels.
-            rpaths = rocm_rpaths()
+            rpaths = rocm_rpaths(rocm_home)
             c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
             lib_so_rpath = f"{rpaths}:$ORIGIN"
             force_rpath = True
@@ -487,21 +502,23 @@ def main() -> None:
         lib_so_rpath = "$ORIGIN"
         force_rpath = False
 
-    aarch64_deps = aarch64_extra_deps(use_cuda) if arch == "aarch64" else []
+    arch_deps = arch_extra_deps(arch, use_cuda)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     wheels = sorted(args.input_dir.glob("*.whl"))
     if not wheels:
         sys.exit(f"No wheels found in {args.input_dir}")
 
-    platform_tag = f"manylinux_2_28_{arch}"
+    if arch not in PLATFORM_TAGS:
+        sys.exit(f"Unknown arch {arch}")
+    platform_tag = PLATFORM_TAGS[arch]
     for whl in wheels:
         repair_wheel(
             whl,
             args.output_dir,
             platform_tag,
             libgomp_path,
-            aarch64_deps,
+            arch_deps,
             bundled_libs,
             aux_files,
             c_so_rpath,
