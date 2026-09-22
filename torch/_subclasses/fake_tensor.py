@@ -2171,14 +2171,32 @@ class FakeTensorMode(TorchDispatchMode):
         output_storage_indices: dict[StorageWeakRef, int] = {}
         is_view_op = isinstance(func, torch._ops.OpOverload) and func.is_view
 
+        # Pre-count how many outputs share each storage so we only reconstruct
+        # storages that actually need it on a cache hit.
+        shared_storage_counts: dict[StorageWeakRef, int] = {}
+        if not is_view_op:
+            for out_elem in output if isinstance(output, tuple) else (output,):
+                if isinstance(out_elem, FakeTensor):
+                    storage = StorageWeakRef(out_elem._typed_storage())
+                    shared_storage_counts[storage] = (
+                        shared_storage_counts.get(storage, 0) + 1
+                    )
+
         def storage_idx_for_output(output: object) -> Optional[int]:
-            # Views already recover their storage from the input.  New outputs
-            # may share a storage with another output (for example, HIP SDPA's
-            # seed/offset scalars), so give each distinct output storage a
-            # stable cache-entry-local index.
+            # Views already recover their storage from the input.  A storage
+            # index is only needed to restore output-output storage aliases
+            # (for example, HIP SDPA's seed/offset scalars) or a nonzero
+            # storage offset.  For the common case of an independent output at
+            # offset zero, returning None keeps the cache-hit path on
+            # empty_strided(), avoiding an empty.set_() that would guard on
+            # (possibly rangeless) symbolic sizes.
             if not isinstance(output, FakeTensor) or is_view_op:
                 return None
             storage = StorageWeakRef(output._typed_storage())
+            is_shared = shared_storage_counts.get(storage, 0) > 1
+            has_offset = output.storage_offset() != 0
+            if not is_shared and not has_offset:
+                return None
             if storage not in output_storage_indices:
                 output_storage_indices[storage] = len(output_storage_indices)
             return output_storage_indices[storage]
