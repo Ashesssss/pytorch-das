@@ -1449,6 +1449,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         # N + 1 for automatic dynamic float arguments
         self.assertEqual(cnt.frame_count, 4)
 
+    @skipIfRocm(msg="sort kernel exceeds the inductor compile-worker timeout")
     def test_sort_dynamic_shape_with_check(self, device):
         if torch.device(device).type != GPU_TYPE:
 
