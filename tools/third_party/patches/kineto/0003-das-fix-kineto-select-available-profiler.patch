@@ -1,3 +1,18 @@
+Date: Wed, 23 Sep 2026 19:18:58 +0800
+Subject: [PATCH 3/3] [das] fix(kineto): select profiler backend by SDK availability
+
+Why:
+Kineto selects rocprofiler-sdk from the ROCm version even when the SDK is absent, causing CMake configuration to fail.
+
+What:
+Detect the SDK library and headers, fall back to Roctracer when absent, and fail clearly if neither backend library is available.
+
+Impact:
+SDK-free builds can use Roctracer while SDK-equipped builds retain the SDK path.
+---
+ libkineto/CMakeLists.txt | 23 ++++++++++++++++-------
+ 1 file changed, 16 insertions(+), 7 deletions(-)
+
 diff --git a/libkineto/CMakeLists.txt b/libkineto/CMakeLists.txt
 --- a/libkineto/CMakeLists.txt
 +++ b/libkineto/CMakeLists.txt
