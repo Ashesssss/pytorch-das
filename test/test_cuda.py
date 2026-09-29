@@ -1159,6 +1159,8 @@ print(t.is_pinned())
         torch.backends.cuda.matmul.allow_tf32 = orig
 
     @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
+    @recover_orig_fp32_precision
+    @patch.dict(os.environ, {"HIPBLASLT_ALLOW_TF32": "0"})
     def test_hipblaslt_allow_tf32(self):
         # The allow_tf32 variable is declared as static in aten/src/ATen/Context.cpp
         # TF32 precision can be enabled via either the environment variable HIP_BLASLT_ALLOW_TF32 
