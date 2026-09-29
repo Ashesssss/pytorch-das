@@ -224,10 +224,20 @@ class LazyBackend : public Backend {
   std::shared_ptr<c10::Allocator> getMemAllocator() override {
     return primary_->getMemAllocator();
   }
+  at::Tensor allocateTensor(long size, at::TensorOptions options) override {
+    return primary_->allocateTensor(size, options);
+  }
+  bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override {
+    return primary_->supportsTensorAlloc(deviceIdx);
+  }
 
   // ---- Lifecycle / fault tolerance: fan out to every comm we own ----
   void eagerConnectSingleDevice(at::Device device) override {
     primary_->eagerConnectSingleDevice(device);
+  }
+  void setBoundDeviceId(std::optional<at::Device> device) override {
+    primary_->setBoundDeviceId(device);
+    Backend::setBoundDeviceId(primary_->getBoundDeviceId());
   }
   void setTimeout(std::chrono::milliseconds timeout) override {
     primary_->setTimeout(timeout);
