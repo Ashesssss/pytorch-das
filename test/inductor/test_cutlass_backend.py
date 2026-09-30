@@ -65,6 +65,7 @@ from torch._inductor.codecache import XPUCodeCache
 from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 from torch._inductor.codegen.cutlass.utils import (
     _gen_ops_cached,
+    _normalize_cuda_arch,
     get_max_alignment,
     try_import_cutlass,
 )
@@ -82,6 +83,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     SM90OrLater,
     xfailIfSM120OrLater,
+    xfailIfSM12X,
 )
 from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
 from torch.testing._internal.common_utils import (
@@ -194,8 +196,8 @@ use_evt_config = config.patch(
     {
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
-        "cuda.cutlass_max_profiling_configs": 1,
-        "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+        "cutlass.cutlass_max_profiling_configs": 1,
+        "benchmark_template_fusion": False,  # EVT doesn't support benchmark fusion yet
         "cutlass.cutlass_tma_only": GPU_TYPE
         == "cuda",  # Only CUDA requires TMA for EVT.
         "cutlass.cutlass_epilogue_fusion_enabled": True,
@@ -206,9 +208,9 @@ fp8_config = config.patch(
     {
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
-        "cuda.cutlass_max_profiling_configs": 1,
-        "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-        "cuda.cutlass_tma_only": True,
+        "cutlass.cutlass_max_profiling_configs": 1,
+        "benchmark_template_fusion": False,  # EVT doesn't support benchmark fusion yet
+        "cutlass.cutlass_tma_only": True,
     }
 )
 
@@ -350,6 +352,17 @@ class TestCutlassBackend(TestCase):
         int8_ops = [op for op in cutlass_ops if "s8_s8_s32" in op.configuration_name()]
         self.assertGreater(len(cutlass_ops), 0)
         self.assertEqual(int8_ops, [])
+
+    @skipXPUIf(True, "CUDA-specific CUTLASS arch feature set")
+    def test_sm121_reuses_sm120_generator(self):
+        from torch.utils import _pytree as pytree
+
+        self.assertTrue(try_import_cutlass())
+        self.assertEqual(_normalize_cuda_arch("sm_121"), "121")
+
+        ops = pytree.tree_flatten(_gen_ops_cached("121", "13.3", "cuda"))[0]
+        cutlass_ops = [op for op in ops if hasattr(op, "configuration_name")]
+        self.assertGreater(len(cutlass_ops), 0)
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
@@ -786,9 +799,9 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                    "cuda.cutlass_max_profiling_configs": 2,
-                    "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-                    "cuda.cutlass_tma_only": True,
+                    "cutlass.cutlass_max_profiling_configs": 2,
+                    "benchmark_template_fusion": False,  # EVT doesn't support benchmark fusion yet
+                    "cutlass.cutlass_tma_only": True,
                 }
             ),
             dynamo_config.patch({"error_on_recompile": dynamic}),
@@ -1511,6 +1524,7 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM12X
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_op_denylist(
         self,
@@ -1565,6 +1579,7 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(True, "Intel cutlass doesn't have pingpong kernels yet")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM12X
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_op_allowlist(
         self,
@@ -1620,6 +1635,7 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(True, "fp8 not supported on xpu cutlass backend yet")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM12X
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_fp8_scaled_mm_fast_accum_filtering(
         self,
@@ -1712,6 +1728,7 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM12X
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_shape_coverage_mm(
         self,
@@ -1944,6 +1961,7 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM12X
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_integration(self):
         """
