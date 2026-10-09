@@ -2219,7 +2219,10 @@ class FakeTensorMode(TorchDispatchMode):
             hops_that_skip_faketensor_cache,
             registered_hop_fake_fns,
         )
-        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+        from torch.fx.experimental.symbolic_shapes import (
+            has_free_unbacked_symbols,
+            statically_known_true,
+        )
 
         self._validate_cache_key(func, args, kwargs)
 
@@ -2303,7 +2306,10 @@ class FakeTensorMode(TorchDispatchMode):
                 return None
             storage = StorageWeakRef(output._typed_storage())
             is_shared = shared_storage_counts.get(storage, 0) > 1
-            has_offset = output.storage_offset() != 0
+            # storage_offset may be symbolic (e.g. select with an unbacked
+            # index from .item()), so avoid guarding on it; conservatively
+            # treat an unknown offset as nonzero.
+            has_offset = not statically_known_true(output.storage_offset() == 0)
             if not is_shared and not has_offset:
                 return None
             if storage not in output_storage_indices:
