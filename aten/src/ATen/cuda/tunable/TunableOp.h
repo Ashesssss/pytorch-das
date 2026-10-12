@@ -14,9 +14,7 @@
 #include <ATen/cuda/Sleep.h>
 #include <ATen/native/TunableOp.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#ifndef USE_ROCM
 #include <c10/cuda/CUDAGraphsC10Utils.h>
-#endif
 
 #ifndef _WIN32
 #include <cxxabi.h>
@@ -61,21 +59,18 @@ class TunableOp {
         if (result == ResultEntry::Null()) {
           bool should_record_untuned = !ctx->IsTuningEnabled();
           if (ctx->IsTuningEnabled()) {
-#ifndef USE_ROCM
             bool is_capturing =
                 c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
                 c10::cuda::CaptureStatus::None;
             if (!is_capturing) {
+#ifndef USE_ROCM
               RegisterOpCandidates(params);
+#endif
               result = FindFastest(params);
               mgr.Add(op_sig, params_sig, result);
             } else {
               should_record_untuned = true;
             }
-#else
-            result = FindFastest(params);
-            mgr.Add(op_sig, params_sig, result);
-#endif
           }
           if (should_record_untuned && ctx->IsRecordUntunedEnabled()) {
             // or record the gemm into file
