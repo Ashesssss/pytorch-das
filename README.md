@@ -5,8 +5,8 @@
 本仓库基于官方 PyTorch 项目，包含海光（Hygon）维护的定制修改。
 
 - 上游项目：PyTorch
-- 上游 Tag：v2.12.0
-- 上游 Commit：0d62256a2b23365f8e1604297eb23a6545102aa8
+- 上游 Tag：v2.14.1
+- 上游 Commit：5c4886908584029761b579af026dcfb627c84070
 - 上游源码：https://github.com/pytorch/pytorch
 - 上游文档：https://pytorch.org/docs/stable/
 - 上游 README 保留在本仓库：[README_ORIGIN.md](README_ORIGIN.md)
@@ -35,13 +35,13 @@ PyTorch 是一个基于 Python 的开源机器学习框架，以其强大的 GPU
 
 1. 暂不支持的官方版本或功能
 
-   **更高版本**：当前仓库开源 PyTorch 2.12.0 版本，更高版本将在后续陆续开源，敬请期待。
+   **更高版本**：当前仓库开源 PyTorch 2.14.1 版本，更高版本将在后续陆续开源，敬请期待。
 
 2. PyTorch 软件版本配套关系
 
    | PyTorch 版本 | HCU 适配版 PyTorch 软件包版本 | HCU 加速卡型号       | DTK 版本 |
    | ------------ | ----------------------------- | -------------------- | -------- |
-   | 2.12.0       | 2.12.0+das.opt1.dtk2604       | K100_AI、bw1000 等  | 26.04    |
+   | 2.14.1       | 2.14.1+das.opt1.dtk2610       | K100_AI、bw1000 等  | 26.10    |
 
 ## 前置条件
 
@@ -73,7 +73,7 @@ python -c "import torch; print(torch.__version__)"
 
 - 编译镜像：Rocky Linux 8（CentOS 8）及以上，自带 GCC 工具链，无需额外激活
 - Python 3.10（脚本默认 `PYTHON_VERSION=3.10.12`）
-- DTK 26.04（运行脚本前安装到 `/opt/dtk`，或通过 `DTK_ROOT` 指定安装目录）
+- DTK 26.10（运行脚本前安装到 `/opt/dtk`，或通过 `DTK_ROOT` 指定安装目录）
 - 编译机需可访问代码仓库（Git 服务）与三方库下载服务器
 
 ### 编译步骤
@@ -164,7 +164,7 @@ bash tools/third_party/apply_patches.sh
 - [驱动](https://cancon.hpccube.com:65024/6/main)
 - [学习中心](https://developer.hpccube.com/study/)
 - [论坛](https://forum.hpccube.com/)
-- [PyTorch 2.12 官方文档](https://pytorch.org/docs/2.12/)
+- [PyTorch 2.14 官方文档](https://pytorch.org/docs/2.14/)
 
 ## 参考链接
 
