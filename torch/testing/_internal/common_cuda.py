@@ -269,9 +269,9 @@ def evaluate_platform_supports_fp8_grouped_gemm():
         if torch.version.hip:
             if "USE_MSLK" not in torch.__config__.show():
                 return False
-            # gfx1250 omitted: MSLK only builds gfx942/gfx950 kernels (see the arch
+            # gfx1250 omitted: MSLK only builds gfx942/gfx950/gfx938 kernels (see the arch
             # filter in aten/src/ATen/CMakeLists.txt). Add gfx1250 here once MSLK does.
-            archs = ['gfx942', 'gfx950']
+            archs = ['gfx942', 'gfx950', 'gfx938']
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
