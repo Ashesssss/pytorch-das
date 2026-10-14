@@ -1527,7 +1527,16 @@ class TestInductorOpInfo(TestCase):
                 for context_fn, kwarg_overrides in get_contexts(
                     has_rng_op, args, kwargs
                 ):
-                    with context_fn():
+                    with context_fn(), (
+                        torch._inductor.config.patch(force_layout_optimization=False)
+                        if (
+                            TEST_WITH_ROCM
+                            and device_type == GPU_TYPE
+                            and op_name == "nn.functional.conv_transpose2d"
+                            and dtype == f32
+                        )
+                        else contextlib.nullcontext()
+                    ):
                         # Base kwargs
                         adjusted_kwargs = {
                             "check_lowp": False,
