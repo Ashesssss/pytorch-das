@@ -1070,7 +1070,7 @@ class ComboKernelTests(TestCase):
                 if torch._inductor.config.combo_kernel_per_subkernel_blocks:
                     self.assertEqual([83660, 1, 1], grid)
                 else:
-                    self.assertEqual([4, 45260, 2], grid)
+                    self.assertEqual([2, 90520, 1], grid)
 
         self.assertEqual(out_eager, out_compiled)
 
