@@ -2495,7 +2495,7 @@ class TestReductions(TestCase):
         run_test(torch.zeros(64, 61, dtype=dtype, device=device))
         run_test(torch.zeros(64, 1, dtype=dtype, device=device))
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     def test_argmax_small_k_rocm(self, device, dtype):
         if torch.version.hip is None:
