@@ -141,7 +141,7 @@ void max_launch_kernel(TensorIterator& iter) {
             break;
           }
         }
-        if(dim!=-1&&self.dim()==2&&self.sizes()[dim]>=1024&&self.strides()[1-dim]==1&&self.strides()[dim]%VEC==0){
+        if(dim!=-1&&self.dim()==2&&self.sizes()[dim]>=1024&&self.strides()[1-dim]==1&&self.strides()[dim]%VEC==0&&self.numel()+self.strides()[dim]*1024<(1LL<<31)){
           int grid=self.strides()[dim]/VEC;
           int block=1024;
           scalar_t* result_data = result.data_ptr<scalar_t>();
