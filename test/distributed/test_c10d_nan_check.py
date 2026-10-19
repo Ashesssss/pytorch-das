@@ -40,8 +40,9 @@ class AbstractNanCheckHookTest(C10dBackendTest):
         if self.device_type == "cuda" and self._testMethodName in DETECTING_TESTS:
             # CUDA and ROCm can report the device trap as a runtime exception.
             # _assert_nan_detected normalizes that path with os._exit(SIGABRT).
+            expected = -signal.SIGABRT if torch.version.hip else signal.SIGABRT
             self.special_return_code_checks = {
-                getattr(self, self._testMethodName).__wrapped__: signal.SIGABRT
+                getattr(self, self._testMethodName).__wrapped__: expected
             }
 
     def _assert_nan_detected(self, tensor):
