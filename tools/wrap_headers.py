@@ -18,6 +18,9 @@ EXCLUDE_PATTERNS = (
     "torch/csrc/stable/",
     "torch/csrc/inductor/aoti_torch/c/",
     "torch/csrc/inductor/aoti_torch/generated/",
+    # Hipify injects this macro-only header into generated HIP sources.
+    # Stable ABI extensions must be able to include it unchanged.
+    "ATen/dtk_macros.h",
     # Third-party headers: not part of the torch stable API surface, and
     # wrapping them creates an incremental-build cycle because the install
     # step un-wraps them on every build (source content differs from the
