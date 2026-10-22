@@ -27,10 +27,8 @@ from common_utils import (
     is_valid_inplace_sample_input,
     opsToleranceOverride,
     skip,
-    skipIf,
     tol1,
     xfail,
-    xfailIf,
 )
 from functorch_additional_op_db import additional_op_db
 
@@ -63,6 +61,7 @@ from torch.testing._internal.common_device_type import (
     toleranceOverride,
 )
 from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.opinfo.core import XFailRule, sample_skips_and_xfails
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
@@ -4412,6 +4411,15 @@ class TestVmapOperatorsOpInfo(TestCase):
             torch.complex64: tol(atol=1e-04, rtol=1e-04),
         }
     )
+    @sample_skips_and_xfails(
+        [
+            XFailRule(
+                op_match_fn=lambda device, op: op.full_name == "to",
+                sample_match_fn=lambda device, sample: sample.kwargs["memory_format"]
+                == torch.channels_last,
+            )
+        ]
+    )
     @skipOps(
         vmap_fail.union(
             {
@@ -4431,17 +4439,13 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
-                # RuntimeError: required rank 4 tensor to use channels_last format
-                xfailIf(
-                    "to",
-                    lambda sample: (
-                        sample.kwargs["memory_format"] == torch.channels_last
-                    ),
-                ),
                 xfail("native_group_norm"),
-                # https://github.com/pytorch/pytorch/issues/164556
-                skipIf("cholesky_solve", lambda *args: TEST_WITH_ROCM),
             }
+        ).union(
+            # https://github.com/pytorch/pytorch/issues/164556
+            # This is a whole-test ROCm skip. A sample-level skipIf rule is
+            # applied twice when CPU and CUDA OpInfo tests are instantiated.
+            {skip("cholesky_solve", device_type="cuda")} if TEST_WITH_ROCM else set()
         ),
     )
     def test_vmap_exhaustive(self, device, dtype, op):
