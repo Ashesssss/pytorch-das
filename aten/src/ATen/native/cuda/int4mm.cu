@@ -1167,6 +1167,9 @@ at::Tensor _weight_int4pack_mm_cuda(
   if (!isCDNA2orLater(A.device().index())) {
     TORCH_CHECK(false, "_weight_int4pack_mm_cuda is only supported on HCU arch gfx938 or gfx936 or gfx92a or later");
   }
+#else
+  TORCH_CHECK(at::cuda::getCurrentDeviceProperties()->major >= 8,
+              "_weight_int4pack_mm_cuda requires a GPU with compute capability 8.0 or newer");
 #endif
 
   constexpr int32_t kMTileSize = 16;
@@ -1368,6 +1371,8 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   }
   constexpr int32_t kNTileSize = 16;
 #else
+  TORCH_CHECK(at::cuda::getCurrentDeviceProperties()->major >= 8,
+              "_convert_weight_to_int4pack_cuda requires a GPU with compute capability 8.0 or newer");
   constexpr int32_t kNTileSize = 8;
 #endif
   constexpr int32_t kKTileSize = 16;
