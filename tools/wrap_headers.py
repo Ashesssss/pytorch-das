@@ -18,6 +18,10 @@ EXCLUDE_PATTERNS = (
     "torch/csrc/stable/",
     "torch/csrc/inductor/aoti_torch/c/",
     "torch/csrc/inductor/aoti_torch/generated/",
+    # DTK/FastPT: hipify injects this header into every hipified file;
+    # it only defines DTK version macros and has no C++ ABI surface,
+    # so wrapping it breaks stable-ABI extensions.
+    "ATen/dtk_macros.h",    
     # Third-party headers: not part of the torch stable API surface, and
     # wrapping them creates an incremental-build cycle because the install
     # step un-wraps them on every build (source content differs from the
