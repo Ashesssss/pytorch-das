@@ -5,8 +5,8 @@
 本仓库基于官方 PyTorch 项目，包含海光（Hygon）维护的定制修改。
 
 - 上游项目：PyTorch
-- 上游 Tag：v2.12.0
-- 上游 Commit：0d62256a2b23365f8e1604297eb23a6545102aa8
+- 上游 Tag：v2.13.0
+- 上游 Commit：cf30153c4c131c8164ee7798e5022d810682e2cb
 - 上游源码：https://github.com/pytorch/pytorch
 - 上游文档：https://pytorch.org/docs/stable/
 - 上游 README 保留在本仓库：[README_ORIGIN.md](README_ORIGIN.md)
@@ -35,13 +35,13 @@ PyTorch 是一个基于 Python 的开源机器学习框架，以其强大的 GPU
 
 1. 暂不支持的官方版本或功能
 
-   **更高版本**：当前仓库开源 PyTorch 2.12.0 版本，更高版本将在后续陆续开源，敬请期待。
+   **更高版本**：当前仓库对应 PyTorch 2.13.0 HCU 开发分支。发布包的版本与兼容范围以正式发布公告为准。
 
 2. PyTorch 软件版本配套关系
 
    | PyTorch 版本 | HCU 适配版 PyTorch 软件包版本 | HCU 加速卡型号       | DTK 版本 |
    | ------------ | ----------------------------- | -------------------- | -------- |
-   | 2.12.0       | 2.12.0+das.opt1.dtk2604       | K100_AI、bw1000 等  | 26.04    |
+   | 2.13.0       | 待发布                        | K100_AI、bw1000 等  | 26.04    |
 
 ## 前置条件
 
@@ -164,7 +164,7 @@ bash tools/third_party/apply_patches.sh
 - [驱动](https://cancon.hpccube.com:65024/6/main)
 - [学习中心](https://developer.hpccube.com/study/)
 - [论坛](https://forum.hpccube.com/)
-- [PyTorch 2.12 官方文档](https://pytorch.org/docs/2.12/)
+- [PyTorch 2.13 官方文档](https://pytorch.org/docs/2.13/)
 
 ## 参考链接
 
