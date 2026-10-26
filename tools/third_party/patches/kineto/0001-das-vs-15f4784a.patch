@@ -15,7 +15,7 @@ index 462b784..c19fca2 100644
 -      "ROCm ${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}. "
 -      "Upgrade ROCm or set KINETO_BACKEND=cpu.")
 +  # Prefer rocprofiler-sdk, but fall back to roctracer when the ROCm stack does
-+  # not ship rocprofiler-sdk. Some distributions (e.g. DTK/DCU) report ROCm >= 7
++  # not ship rocprofiler-sdk. Some distributions (e.g. DTK/HCU) report ROCm >= 7
 +  # yet provide roctracer only, so probe for the header instead of trusting the
 +  # version. Set USE_ROCPROFILER_SDK explicitly to override the probe.
 +  if(NOT DEFINED USE_ROCPROFILER_SDK)
@@ -108,7 +108,7 @@ index 64363d9..429bbdf 100644
  ]
  
 +# roctracer is the pre-rocprofiler-sdk backend, kept for ROCm stacks that ship
-+# roctracer only (e.g. DTK/DCU). Selected via the ROCTRACER_FALLBACK define.
++# roctracer only (e.g. DTK/HCU). Selected via the ROCTRACER_FALLBACK define.
 +ROCTRACER_API_SRCS = [
 +    "src/RocLogger.cpp",
 +    "src/RoctracerActivityApi.cpp",
