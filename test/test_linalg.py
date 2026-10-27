@@ -10802,7 +10802,6 @@ class TestLinalgCudaOnly(TestCase):
             C = torch.matmul(A, B)
             self.assertEqual(C.shape, (128, 96))
 
-    @skipIfRocm
     @dtypes(torch.half)
     def test_cuda_graph_capture_skips_first_tuning_tunableop(self, device, dtype):
         with self._tunableop_ctx():
@@ -10815,10 +10814,17 @@ class TestLinalgCudaOnly(TestCase):
             B = torch.randn(64, 64, device=device, dtype=dtype)
             C = torch.empty(64, 64, device=device, dtype=dtype)
 
-            torch.cuda.tunable.enable(False)
+            if TEST_WITH_ROCM:
+                # HIP eagerly initializes candidates on the first TunableOp call.
+                # Warm them up outside capture without creating a tuning result.
+                torch.cuda.tunable.tuning_enable(False)
+            else:
+                torch.cuda.tunable.enable(False)
             torch.mm(A, B, out=C)
             torch.cuda.synchronize()
             torch.cuda.tunable.enable(True)
+            torch.cuda.tunable.tuning_enable(True)
+            self.assertEqual(len(torch.cuda.tunable.get_results()), ref_num_results)
 
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
