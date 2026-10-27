@@ -14,9 +14,7 @@
 #include <ATen/cuda/Sleep.h>
 #include <ATen/native/TunableOp.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#ifndef USE_ROCM
 #include <c10/cuda/CUDAGraphsC10Utils.h>
-#endif
 
 #ifndef _WIN32
 #include <cxxabi.h>
@@ -68,11 +66,10 @@ class TunableOp {
 
         if (ctx->IsTuningEnabled()) {
           if (!concrete_hit) {
-            bool can_tune = true;
-#ifndef USE_ROCM
-            can_tune =
+            const bool can_tune =
                 c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
                 c10::cuda::CaptureStatus::None;
+#ifndef USE_ROCM
             if (can_tune) {
               RegisterOpCandidates(params);
             }
