@@ -7,7 +7,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 PATCH_ROOT="${SCRIPT_DIR}/patches"
-LIBRARIES=(fbgemm kineto)
+LIBRARIES=(kineto)
+PATCH_LIBRARIES=(mslk)
 
 die() {
   echo "error: $*" >&2
@@ -61,4 +62,29 @@ for library in "${LIBRARIES[@]}"; do
   fi
 
   die "third_party/${library}: patch cannot be applied"
+done
+
+# These patches touch nested submodules (e.g. mslk/external/composable_kernel),
+# which git apply cannot cross, so use patch instead.
+for library in "${PATCH_LIBRARIES[@]}"; do
+  submodule_dir="${REPO_ROOT}/third_party/${library}"
+  series_file="${PATCH_ROOT}/${library}/series"
+
+  [[ -f "${series_file}" ]] || die "series file not found: ${series_file}"
+  git -C "${submodule_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+    die "submodule not initialized: third_party/${library}"
+  load_series "${series_file}"
+
+  for patch_file in "${PATCH_FILES[@]}"; do
+    if patch -d "${submodule_dir}" -p1 -N --batch --dry-run --silent \
+        < "${patch_file}" >/dev/null 2>&1; then
+      patch -d "${submodule_dir}" -p1 -N --batch --silent < "${patch_file}"
+      echo "third_party/${library}: patched $(basename -- "${patch_file}")"
+    elif patch -d "${submodule_dir}" -p1 -R --batch --dry-run --silent \
+        < "${patch_file}" >/dev/null 2>&1; then
+      echo "third_party/${library}: already patched $(basename -- "${patch_file}")"
+    else
+      die "third_party/${library}: patch cannot be applied: ${patch_file}"
+    fi
+  done
 done
