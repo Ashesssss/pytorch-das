@@ -782,7 +782,7 @@ std::optional<c10::ScalarType> out_dtype) {
   // Keep use_fast_path as false till ck kernel perf is optimal.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
   bool use_hipblaslt = true;
-  static const auto env_hipblaslt = std::getenv("USE_BLAS_GROUPMM");
+  const char* env_hipblaslt = std::getenv("USE_BLAS_GROUPMM");
   if (env_hipblaslt != nullptr && std::string(env_hipblaslt) == "1") {
     use_hipblaslt = false;
   }
