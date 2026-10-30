@@ -134,18 +134,18 @@ if [ "${MAGMA_ENABLED}" = "1" ]; then
     fi
     echo ">>>>>>>>>>LOAD MAGMA<<<<<<<<<<"
     cd "${ROCM_PATH}"
-    wget "${MAGMA_URL}"
-    rm -rf magma
-    tar -zxf magma*.tar.gz
-    rm -f magma*.tar.gz
-    if [ ! -d magma ]; then
-        MAGMA_EXTRACT_DIR=$(find . -maxdepth 1 -type d -name 'magma*' ! -name magma | sort | tail -n 1)
-        if [ -z "${MAGMA_EXTRACT_DIR}" ]; then
-            echo "ERROR: cannot find extracted MAGMA directory under /opt/dtk" >&2
-            exit 1
-        fi
-        mv "${MAGMA_EXTRACT_DIR}" magma
+    rm -rf magma magma.tar.gz
+    wget -O magma.tar.gz "${MAGMA_URL}"
+    MAGMA_STAGE_DIR=$(mktemp -d "${ROCM_PATH}/magma-extract.XXXXXX")
+    tar -zxf magma.tar.gz -C "${MAGMA_STAGE_DIR}"
+    rm -f magma.tar.gz
+    MAGMA_EXTRACT_DIR=$(find "${MAGMA_STAGE_DIR}" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+    if [ -z "${MAGMA_EXTRACT_DIR}" ]; then
+        echo "ERROR: cannot find extracted MAGMA directory under ${MAGMA_STAGE_DIR}" >&2
+        exit 1
     fi
+    mv "${MAGMA_EXTRACT_DIR}" magma
+    rm -rf "${MAGMA_STAGE_DIR}"
 
     ### 将 MKL 的库文件复制到 magma 库路径下
     cd magma/lib/
@@ -225,7 +225,6 @@ export CPLUS_INCLUDE_PATH=${ROCM_PATH}/rocrand/include:$CPLUS_INCLUDE_PATH
 if [ "${MAGMA_ENABLED}" = "1" ]; then
     export LD_LIBRARY_PATH=${ROCM_PATH}/magma/lib:$LD_LIBRARY_PATH
 fi
-export LDFLAGS="-Wl,--copy-dt-needed-entries"
 
 ### 给 hipify 脚本加上权限并转码
 if [ -f third_party/gloo/tools/amd_build/build_amd.py ]; then
@@ -250,6 +249,7 @@ if [ "${MAGMA_ENABLED}" = "1" ]; then
 fi
 
 ### 开始编译
+### 编译后出包到 pytorch/dist 文件夹下
 cd "${WORK_SPACE}"
 echo ">>>>>>>compile start>>>>>>>"
 if [ "${MAGMA_ENABLED}" = "1" ]; then
@@ -290,9 +290,7 @@ USE_ROCM_CK_SDPA=0 \
 USE_CUFILE=0 \
 USE_NINJA=ON \
 PYTORCH_ROCM_ARCH=${AMDGPU_TARGETS} \
-python3 setup.py install --user bdist_wheel
+python3 -m build --wheel --no-isolation
 
-### 编译后出包到 pytorch/dist 文件夹下
-cd "${WORK_SPACE}"
-echo ">>>>>>>>>>wheel<<<<<<<<<<"
-USE_NCCL=0 python3 -m pip wheel . -w ./dist --no-deps --no-build-isolation
+
+
