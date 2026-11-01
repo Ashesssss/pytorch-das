@@ -7,7 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 PATCH_ROOT="${SCRIPT_DIR}/patches"
-LIBRARIES=(fbgemm kineto)
+LIBRARIES=(kineto)
 
 die() {
   echo "error: $*" >&2
@@ -38,17 +38,15 @@ load_series() {
 for library in "${LIBRARIES[@]}"; do
   submodule_dir="${REPO_ROOT}/third_party/${library}"
   series_file="${PATCH_ROOT}/${library}/series"
+  expected_commit="$(git -C "${REPO_ROOT}" rev-parse "HEAD:third_party/${library}")"
 
   [[ -f "${series_file}" ]] || die "series file not found: ${series_file}"
-  git -C "${submodule_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+  [[ -e "${submodule_dir}/.git" ]] ||
     die "submodule not initialized: third_party/${library}"
+  actual_commit="$(git -C "${submodule_dir}" rev-parse HEAD)"
+  [[ "${actual_commit}" == "${expected_commit}" ]] ||
+    die "third_party/${library}: expected ${expected_commit}, found ${actual_commit}"
   load_series "${series_file}"
-
-  if git -C "${submodule_dir}" apply --check "${PATCH_FILES[@]}" >/dev/null 2>&1; then
-    git -C "${submodule_dir}" apply "${PATCH_FILES[@]}"
-    echo "third_party/${library}: patched"
-    continue
-  fi
 
   REVERSE_PATCH_FILES=()
   for ((i=${#PATCH_FILES[@]} - 1; i >= 0; i--)); do
@@ -56,9 +54,23 @@ for library in "${LIBRARIES[@]}"; do
   done
   if git -C "${submodule_dir}" apply --reverse --check \
       "${REVERSE_PATCH_FILES[@]}" >/dev/null 2>&1; then
+    [[ ${#PATCH_FILES[@]} -eq 1 ]] ||
+      die "third_party/${library}: exact verification requires one patch"
+    git -C "${submodule_dir}" diff --full-index --binary --no-ext-diff |
+        cmp - "${PATCH_FILES[0]}" >/dev/null ||
+      die "third_party/${library}: has unrelated local changes"
+    git -C "${submodule_dir}" diff --cached --quiet ||
+      die "third_party/${library}: has staged local changes"
     echo "third_party/${library}: already patched"
     continue
   fi
 
-  die "third_party/${library}: patch cannot be applied"
+  if ! git -C "${submodule_dir}" diff --quiet ||
+      ! git -C "${submodule_dir}" diff --cached --quiet; then
+    die "third_party/${library}: has unrelated local changes"
+  fi
+  git -C "${submodule_dir}" apply --check "${PATCH_FILES[@]}" ||
+    die "third_party/${library}: patch cannot be applied"
+  git -C "${submodule_dir}" apply "${PATCH_FILES[@]}"
+  echo "third_party/${library}: patched"
 done

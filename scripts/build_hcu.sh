@@ -76,9 +76,12 @@ export WORK_SPACE
 export DISTDIR=${WORK_SPACE}/dist
 
 ### 设置 MKL 路径
-### 老镜像通常是 /opt/intel/mkl/lib/intel64_lin；
-### 当前部分容器是 oneAPI MKL，例如 /opt/intel/oneapi/mkl/latest/lib。
-if [ -d /opt/intel/mkl/lib/intel64_lin ]; then
+if [ -f /opt/intel/oneapi/mkl/latest/env/vars.sh ]; then
+    source /opt/intel/oneapi/mkl/latest/env/vars.sh
+fi
+if [ -n "${MKLROOT:-}" ] && [ -d "${MKLROOT}/lib" ]; then
+    export MKL_LIB_DIR="${MKLROOT}/lib"
+elif [ -d /opt/intel/mkl/lib/intel64_lin ]; then
     export MKL_LIB_DIR=/opt/intel/mkl/lib/intel64_lin
 elif [ -d /opt/intel/oneapi/mkl/latest/lib ]; then
     export MKL_LIB_DIR=/opt/intel/oneapi/mkl/latest/lib
@@ -87,28 +90,26 @@ else
     exit 1
 fi
 
-copy_mkl_lib() {
-    local name="$1"
-    local dst_dir="$2"
-
-    mkdir -p "${dst_dir}"
-    if [ -f "${MKL_LIB_DIR}/${name}" ]; then
-        cp "${MKL_LIB_DIR}/${name}" "${dst_dir}/${name}"
-    elif [ -f "${MKL_LIB_DIR}/${name}.2" ]; then
-        cp "${MKL_LIB_DIR}/${name}.2" "${dst_dir}/${name}"
-    else
-        echo "ERROR: cannot find ${name} or ${name}.2 in ${MKL_LIB_DIR}" >&2
-        exit 1
-    fi
-}
-
-### 同时保留 .so.2 实体文件和 .so 软链接，兼容 PyTorch 与 MAGMA 的依赖名
-copy_mkl_lib_pair() {
+copy_mkl_runtime_lib() {
     local base_name="$1"
     local dst_dir="$2"
+    local source_file real_file real_name
 
-    copy_mkl_lib "${base_name}.so.2" "${dst_dir}"
-    ln -sfn "${base_name}.so.2" "${dst_dir}/${base_name}.so"
+    if [ -e "${MKL_LIB_DIR}/${base_name}.so" ]; then
+        source_file="${MKL_LIB_DIR}/${base_name}.so"
+    elif [ -e "${MKL_LIB_DIR}/${base_name}.so.2" ]; then
+        source_file="${MKL_LIB_DIR}/${base_name}.so.2"
+    else
+        echo "ERROR: cannot find ${base_name}.so or .so.2 in ${MKL_LIB_DIR}" >&2
+        exit 1
+    fi
+    real_file="$(readlink -f "${source_file}")"
+    real_name="$(basename "${real_file}")"
+    mkdir -p "${dst_dir}"
+    cp -a "${real_file}" "${dst_dir}/${real_name}"
+    if [ "${real_name}" != "${base_name}.so" ]; then
+        ln -sfn "${real_name}" "${dst_dir}/${base_name}.so"
+    fi
 }
 
 ### 导入 DTK 内置环境变量
@@ -118,13 +119,92 @@ source "${DTK_ROOT}/env.sh"
 ### 设置 PyTorch 编译所需的 DTK/ROCm 环境
 export ROCM_PATH="${DTK_ROOT}"
 export HIP_PATH="${ROCM_PATH}/hip"
-export TARGETS="gfx906;gfx926;gfx928;gfx936;gfx938"
-export AMDGPU_TARGETS="${TARGETS}"
+export AMDGPU_TARGETS="${AMDGPU_TARGETS:-gfx906;gfx926;gfx928;gfx936;gfx938}"
 export PYTHON_VERSION=3.10.12
 export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${ROCM_PATH}/hcc/bin:${ROCM_PATH}/hip/bin:${ROCM_PATH}/miopen/bin:${PATH}"
 export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib64:${ROCM_PATH}/hip/lib:${ROCM_PATH}/llvm/lib:${ROCM_PATH}/opencl/lib/x86_64:${ROCM_PATH}/miopen/lib:${ROCM_PATH}/rocblas/lib:${ROCM_PATH}/magma/lib:${MKL_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 export MIOPEN_SYSTEM_DB_PATH="${ROCM_PATH}/miopen/share/miopen/db/"
 export PYTORCH_CUSTOM_SUFFIX=''
+
+# Match the version source used by cmake/public/LoadHIP.cmake.
+if [ ! -f "${DTK_ROOT}/.dtk_version" ]; then
+    echo "ERROR: missing ${DTK_ROOT}/.dtk_version" >&2
+    exit 1
+fi
+DTK_VERSION_LINE="$(head -n 1 "${DTK_ROOT}/.dtk_version")"
+if [[ "${DTK_VERSION_LINE}" =~ ^DTK[-_]([0-9]+)\.([0-9][0-9])([._-]|$) ]]; then
+    DTK_RELEASE="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+else
+    echo "ERROR: invalid DTK version: ${DTK_VERSION_LINE}" >&2
+    exit 1
+fi
+echo "Detected DTK release: ${DTK_RELEASE}"
+
+if [ "${DTK_RELEASE}" = "2604" ]; then
+    # DTK 26.04 needs explicit amd_comgr lookup in hip-lang-config.cmake.
+    HIP_LANG_CONFIG="${DTK_ROOT}/hip/lib/cmake/hip-lang/hip-lang-config.cmake"
+    python3 - "${HIP_LANG_CONFIG}" <<'PY'
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import tempfile
+
+path = Path(sys.argv[1])
+raw = path.read_bytes()
+bom = raw.startswith(b"\xef\xbb\xbf")
+text = raw.decode("utf-8-sig")
+if "\ufffd" in text:
+    raise ValueError(f"replacement character in {path}")
+if b"\r\n" in raw and raw.count(b"\r\n") != raw.count(b"\n"):
+    raise ValueError(f"mixed line endings in {path}")
+newline = "\r\n" if b"\r\n" in raw else "\n"
+text = text.replace("\r\n", "\n")
+old = re.compile(
+    r"(?m)^(?P<indent>[ \t]*)find_dependency\(AMDDeviceLibs\)\n"
+    r"(?P=indent)find_dependency\(amd_comgr\)[ \t]*$"
+)
+anchor = 'include( "${CMAKE_CURRENT_LIST_DIR}/hip-lang-targets.cmake" )'
+replacement = (
+    "find_dependency(AMDDeviceLibs)\n"
+    "find_dependency(amd_comgr PATHS ${ROCM_PATH}/lib64/cmake/amd_comgr)\n"
+    + anchor
+)
+if replacement in text:
+    if old.search(text):
+        raise ValueError(f"duplicate active dependencies in {path}")
+    print(f"DTK 26.04 hip-lang dependencies already adjusted: {path}")
+    sys.exit(0)
+if len(old.findall(text)) != 1 or text.count(anchor) != 1:
+    raise ValueError(f"unexpected hip-lang dependency layout in {path}")
+updated = old.sub(
+    lambda match: (
+        f"{match['indent']}#find_dependency(AMDDeviceLibs)\n"
+        f"{match['indent']}#find_dependency(amd_comgr)"
+    ),
+    text,
+    count=1,
+)
+updated = updated.replace(anchor, replacement, 1)
+encoded = (b"\xef\xbb\xbf" if bom else b"") + updated.replace("\n", newline).encode("utf-8")
+fd, temp_name = tempfile.mkstemp(prefix=".hip-lang-config.", dir=path.parent)
+try:
+    with os.fdopen(fd, "wb") as temp:
+        temp.write(encoded)
+    os.chmod(temp_name, stat.S_IMODE(path.stat().st_mode))
+    os.replace(temp_name, path)
+finally:
+    if os.path.exists(temp_name):
+        os.unlink(temp_name)
+if path.read_bytes() != encoded or "\ufffd" in path.read_bytes().decode("utf-8-sig"):
+    raise ValueError(f"write verification failed: {path}")
+print(f"Adjusted DTK 26.04 hip-lang dependencies: {path}")
+PY
+elif [ "${DTK_RELEASE}" = "2610" ]; then
+    # The 26.10 package keeps both temporary hip-lang edits disabled.
+    echo "DTK 26.10: skip temporary hip-lang dependency edits"
+fi
 
 ### 加载 magma 库
 if [ "${MAGMA_ENABLED}" = "1" ]; then
@@ -149,6 +229,28 @@ if [ "${MAGMA_ENABLED}" = "1" ]; then
 
     ### 将 MKL 的库文件复制到 magma 库路径下
     cd magma/lib/
+    if [ "${DTK_RELEASE}" = "2610" ]; then
+        for magma_library in libmagma.so libmagma_sparse.so; do
+            [ -e "${magma_library}" ] || continue
+            if readelf -d "${magma_library}" 2>/dev/null |
+                    grep -Fq 'Shared library: [libhipblas.so.2]'; then
+                if ! command -v patchelf >/dev/null 2>&1; then
+                    echo "ERROR: ${magma_library} needs libhipblas.so.2 but patchelf is unavailable" >&2
+                    exit 1
+                fi
+                if [ ! -e "${ROCM_PATH}/lib/libhipblas.so.3" ]; then
+                    echo "ERROR: DTK 26.10 has no ${ROCM_PATH}/lib/libhipblas.so.3" >&2
+                    exit 1
+                fi
+                patchelf --replace-needed libhipblas.so.2 libhipblas.so.3 "${magma_library}"
+                if readelf -d "${magma_library}" 2>/dev/null |
+                        grep -Fq 'Shared library: [libhipblas.so.2]'; then
+                    echo "ERROR: failed to update ${magma_library} hipBLAS dependency" >&2
+                    exit 1
+                fi
+            fi
+        done
+    fi
     for name in \
         libmkl_core \
         libmkl_gf_lp64 \
@@ -156,7 +258,7 @@ if [ "${MAGMA_ENABLED}" = "1" ]; then
         libmkl_def \
         libmkl_vml_def
     do
-        copy_mkl_lib_pair "${name}" .
+        copy_mkl_runtime_lib "${name}" .
     done
 else
     echo ">>>>>>>>>>SKIP MAGMA (USE_MAGMA=0)<<<<<<<<<<"
@@ -176,6 +278,7 @@ bash tools/third_party/apply_patches.sh
 
 ### 返回 PyTorch 目录下
 cd "${WORK_SPACE}"
+export PYTORCH_VERSION_DTK="$(cat version.txt)"
 
 ### 升级 pip
 python3 -m pip install --upgrade pip \
@@ -197,13 +300,11 @@ pip3 install xdoctest==1.1.3 \
     pytest==8.1.1 \
     pytest-timeout \
     Pillow==10.0.1 \
-    numpy==1.24.3 \
     mypy==1.8.0 \
     jmespath==1.0.1 \
     Jinja2==3.1.3 \
     expecttest==0.2.1 \
     tlparse==0.3.5 \
-    numba==0.60.0 \
     sympy==1.13.3 \
     MonkeyType \
     -i https://mirrors.huaweicloud.com/artifactory/pypi-public/simple \
@@ -219,13 +320,13 @@ fi
 
 ### 导入环境变量
 echo ">>>>>>>export envs >>>>>>>"
-export LD_LIBRARY_PATH=${ROCM_PATH}/rocblas/lib:$LD_LIBRARY_PATH
-export C_INCLUDE_PATH=${ROCM_PATH}/rocrand/include:$C_INCLUDE_PATH
-export CPLUS_INCLUDE_PATH=${ROCM_PATH}/rocrand/include:$CPLUS_INCLUDE_PATH
+export LD_LIBRARY_PATH="${ROCM_PATH}/rocblas/lib:${LD_LIBRARY_PATH:-}"
+export C_INCLUDE_PATH="${ROCM_PATH}/rocrand/include:${C_INCLUDE_PATH:-}"
+export CPLUS_INCLUDE_PATH="${ROCM_PATH}/rocrand/include:${CPLUS_INCLUDE_PATH:-}"
 if [ "${MAGMA_ENABLED}" = "1" ]; then
-    export LD_LIBRARY_PATH=${ROCM_PATH}/magma/lib:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH="${ROCM_PATH}/magma/lib:${LD_LIBRARY_PATH}"
 fi
-export LDFLAGS="-Wl,--copy-dt-needed-entries"
+# Do not force --copy-dt-needed-entries; keep caller-provided LDFLAGS.
 
 ### 给 hipify 脚本加上权限并转码
 if [ -f third_party/gloo/tools/amd_build/build_amd.py ]; then
@@ -243,10 +344,17 @@ for name in \
     libmkl_intel_lp64 \
     libmkl_vml_def
 do
-    copy_mkl_lib_pair "${name}" "${WORK_SPACE}/torch/lib"
+    copy_mkl_runtime_lib "${name}" "${WORK_SPACE}/torch/lib"
 done
 if [ "${MAGMA_ENABLED}" = "1" ]; then
     cp "${ROCM_PATH}/magma/lib/libmagma.so" "${WORK_SPACE}/torch/lib/"
+    if command -v patchelf >/dev/null 2>&1; then
+        MAGMA_RUNPATH='$ORIGIN:'"${ROCM_PATH}/lib:${ROCM_PATH}/hip/lib:${ROCM_PATH}/llvm/lib:/opt/hyhal/lib"
+        patchelf --set-rpath "${MAGMA_RUNPATH}" "${WORK_SPACE}/torch/lib/libmagma.so"
+        echo "libmagma.so RUNPATH: $(patchelf --print-rpath "${WORK_SPACE}/torch/lib/libmagma.so")"
+    else
+        echo "WARNING: patchelf unavailable; libmagma.so may not locate bundled MKL libraries" >&2
+    fi
 fi
 
 ### 开始编译
@@ -262,7 +370,7 @@ USE_AOTRITON_FA=0 \
 USE_MEM_EFF_ATTENTION=0 \
 USE_FLASH_ATTENTION=1 \
 USE_FBGEMM=ON \
-USE_MKLDNN=0 \
+USE_MKLDNN=1 \
 USE_CUDA=0 \
 USE_KINETO=1 \
 USE_MKL=ON \

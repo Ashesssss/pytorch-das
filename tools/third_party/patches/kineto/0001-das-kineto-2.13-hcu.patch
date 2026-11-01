@@ -1,0 +1,628 @@
+diff --git a/libkineto/CMakeLists.txt b/libkineto/CMakeLists.txt
+index f17f8b072c9187f84356974613ea8fa6cc82f51d..688061c1ebf47f582015bca4ce0ba87c2d6a3a22 100644
+--- a/libkineto/CMakeLists.txt
++++ b/libkineto/CMakeLists.txt
+@@ -107,15 +107,13 @@ elseif(KINETO_BACKEND STREQUAL "rocm")
+   if(NOT ROCM_INCLUDE_DIRS)
+     set(ROCM_INCLUDE_DIRS "${ROCM_SOURCE_DIR}/include")
+   endif()
+-  if(NOT ROCTRACER_INCLUDE_DIR)
+-    set(ROCTRACER_INCLUDE_DIR "${ROCM_SOURCE_DIR}/include/roctracer")
+-  endif()
+-  message(STATUS " ROCTRACER_INCLUDE_DIR = ${ROCTRACER_INCLUDE_DIR}")
+-
++  unset(ROCM_VERSION_HEADER_PATH CACHE)
++  unset(ROCM_VERSION_HEADER_PATH)
+   find_file(ROCM_VERSION_HEADER_PATH
+     NAMES rocm-core/rocm_version.h
+     NO_DEFAULT_PATH
+     PATHS ${ROCM_INCLUDE_DIRS}
++    NO_CACHE
+   )
+   if(NOT EXISTS ${ROCM_VERSION_HEADER_PATH})
+     message(FATAL_ERROR
+@@ -142,13 +140,48 @@ elseif(KINETO_BACKEND STREQUAL "rocm")
+   message(STATUS "ROCM minor: ${ROCM_VERSION_DEV_MINOR}")
+   message(STATUS "ROCM patch: ${ROCM_VERSION_DEV_PATCH}")
+ 
+-  # Use rocprofiler-sdk for rocm version 6.4 forward
+-  if((ROCM_VERSION_DEV_MAJOR GREATER_EQUAL 7) OR (ROCM_VERSION_DEV_MAJOR GREATER_EQUAL 6 AND ROCM_VERSION_DEV_MINOR GREATER_EQUAL 4))
++  # Select the profiler backend from the components installed in this DTK.
++  set(USE_ROCPROFILER_SDK OFF)
++  # Do not reuse a package location cached for a different ROCm/DTK tree.
++  unset("rocprofiler-sdk_DIR" CACHE)
++  unset("rocprofiler-sdk_DIR")
++  find_package(rocprofiler-sdk CONFIG QUIET
++    PATHS
++      "${ROCM_SOURCE_DIR}/rocprofiler-sdk"
++      "${ROCM_SOURCE_DIR}"
++    NO_DEFAULT_PATH)
++  if(TARGET rocprofiler-sdk::rocprofiler-sdk)
+     set(USE_ROCPROFILER_SDK ON)
+-  endif()
+-  if(USE_ROCPROFILER_SDK)
+     message(STATUS "Building with: rocprofiler-sdk")
+   else()
++    unset(KINETO_ROCTRACER_INCLUDE_DIR CACHE)
++    unset(KINETO_ROCTRACER_INCLUDE_DIR)
++    unset(KINETO_ROCTRACER_LIBRARY CACHE)
++    unset(KINETO_ROCTRACER_LIBRARY)
++    find_path(KINETO_ROCTRACER_INCLUDE_DIR
++      NAMES roctracer.h
++      HINTS
++        "${ROCTRACER_INCLUDE_DIR}"
++        "${ROCM_SOURCE_DIR}/include/roctracer"
++        "${ROCM_SOURCE_DIR}/roctracer/include"
++      NO_DEFAULT_PATH
++      NO_CACHE)
++    find_library(KINETO_ROCTRACER_LIBRARY
++      NAMES roctracer64
++      HINTS
++        "${ROCM_SOURCE_DIR}/lib"
++        "${ROCM_SOURCE_DIR}/lib64"
++        "${ROCM_SOURCE_DIR}/roctracer/lib"
++        "${ROCM_SOURCE_DIR}/roctracer/lib64"
++      NO_DEFAULT_PATH
++      NO_CACHE)
++    if(NOT KINETO_ROCTRACER_INCLUDE_DIR OR NOT KINETO_ROCTRACER_LIBRARY)
++      message(FATAL_ERROR
++        "KINETO_BACKEND=rocm but neither a usable rocprofiler-sdk package nor "
++        "the legacy roctracer headers and library were found under "
++        "${ROCM_SOURCE_DIR}")
++    endif()
++    set(ROCTRACER_INCLUDE_DIR "${KINETO_ROCTRACER_INCLUDE_DIR}")
+     message(STATUS "Building with: libroctracer")
+   endif()
+ elseif(KINETO_BACKEND STREQUAL "xpu")
+@@ -300,21 +333,19 @@ if(KINETO_BACKEND STREQUAL "cuda")
+     target_link_libraries(kineto_base PUBLIC CUDA::nvperf_host)
+   endif()
+ elseif(KINETO_BACKEND STREQUAL "rocm")
+-  target_include_directories(kineto_base SYSTEM PUBLIC
+-        $<BUILD_INTERFACE:${ROCTRACER_INCLUDE_DIR}>
+-        $<BUILD_INTERFACE:${ROCM_INCLUDE_DIRS}>)
++  target_include_directories(kineto_base SYSTEM PUBLIC ${ROCM_INCLUDE_DIRS})
+   if(USE_ROCPROFILER_SDK)
+-    find_library(ROCPROF_LIBRARY NAMES librocprofiler-sdk.so HINTS
+-      ${ROCM_SOURCE_DIR}/lib)
++    target_link_libraries(kineto PUBLIC rocprofiler-sdk::rocprofiler-sdk)
++    target_link_libraries(kineto_base PUBLIC rocprofiler-sdk::rocprofiler-sdk)
+   else()
+-    find_library(ROCPROF_LIBRARY NAMES libroctracer64.so HINTS
+-      ${ROCM_SOURCE_DIR}/lib)
++    target_include_directories(kineto_base SYSTEM PUBLIC
++      "${KINETO_ROCTRACER_INCLUDE_DIR}")
++    target_link_libraries(kineto PUBLIC "${KINETO_ROCTRACER_LIBRARY}")
++    target_link_libraries(kineto_base PUBLIC "${KINETO_ROCTRACER_LIBRARY}")
+   endif()
+-  target_link_libraries(kineto "${ROCPROF_LIBRARY}")
+-  target_link_libraries(kineto_base PUBLIC "${ROCPROF_LIBRARY}")
+   find_library(KINETO_HIP_LIBRARY NAMES libamdhip64.so HINTS
+     ${ROCM_SOURCE_DIR}/lib)
+-  target_link_libraries(kineto "${KINETO_HIP_LIBRARY}")
++  target_link_libraries(kineto PUBLIC "${KINETO_HIP_LIBRARY}")
+   target_link_libraries(kineto_base PUBLIC "${KINETO_HIP_LIBRARY}")
+ elseif(KINETO_BACKEND STREQUAL "xpu")
+   # Bare form, not $<BUILD_INTERFACE:...>, because XPUPTI_INCLUDE_DIR is a
+diff --git a/libkineto/src/RocLogger.h b/libkineto/src/RocLogger.h
+index a59ffada594c99e83f37de3682df11ea38f8054a..dc61dda883f570d7579a3dca23e287e5dac80598 100644
+--- a/libkineto/src/RocLogger.h
++++ b/libkineto/src/RocLogger.h
+@@ -88,6 +88,7 @@ struct rocprofBase {
+   // - roctracer fallback: activity_domain_t
+   uint32_t domain;
+   rocprof_activity_types type;
++  virtual ~rocprofBase() = default;
+ };
+ 
+ struct rocprofRow : public rocprofBase {
+@@ -123,6 +124,7 @@ struct rocprofKernelRow : public rocprofRow {
+                    unsigned int wz,
+                    size_t gss,
+                    hipStream_t stream,
++                   const std::string& kernelName_,
+                    rocprof_activity_types type = ROCTRACER_ACTIVITY_KERNEL)
+       : rocprofRow(id, domain, cid, pid, tid, begin, end, type),
+         functionAddr(faddr),
+@@ -134,7 +136,7 @@ struct rocprofKernelRow : public rocprofRow {
+         workgroupY(wy),
+         workgroupZ(wz),
+         groupSegmentSize(gss),
+-        stream(stream) {}
++        stream(stream), kernelName(kernelName_) {}
+   const void* functionAddr;
+   hipFunction_t function;
+   unsigned int gridX;
+@@ -145,6 +147,7 @@ struct rocprofKernelRow : public rocprofRow {
+   unsigned int workgroupZ;
+   size_t groupSegmentSize;
+   hipStream_t stream;
++  std::string kernelName;
+ };
+ 
+ struct rocprofCopyRow : public rocprofRow {
+diff --git a/libkineto/src/RocmStreamQueue.h b/libkineto/src/RocmStreamQueue.h
+index 797b10c9518b67e020ef39109a495d7d9187c5d8..9c7c04a2e424cb5d778bd011175c806523c54484 100644
+--- a/libkineto/src/RocmStreamQueue.h
++++ b/libkineto/src/RocmStreamQueue.h
+@@ -11,6 +11,7 @@
+ #ifdef HAS_ROCTRACER
+ 
+ #include <cstdint>
++#include <memory>
+ #include <unordered_map>
+ #include <unordered_set>
+ #include <vector>
+@@ -20,6 +21,24 @@
+ namespace KINETO_NAMESPACE {
+ namespace detail {
+ 
++// Accept both owning (std::unique_ptr) and non-owning (raw pointer) row
++// storage so the same helpers work for RoctracerLogger and RocprofLogger.
++inline rocprofBase* rowPtr(rocprofBase* row) {
++  return row;
++}
++
++inline rocprofBase* rowPtr(std::unique_ptr<rocprofBase>& row) {
++  return row.get();
++}
++
++inline const rocprofBase* rowPtr(const rocprofBase* row) {
++  return row;
++}
++
++inline const rocprofBase* rowPtr(const std::unique_ptr<rocprofBase>& row) {
++  return row.get();
++}
++
+ inline uint64_t streamIdFromHipStream(hipStream_t stream) {
+   return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(stream));
+ }
+@@ -67,12 +86,14 @@ inline void rememberQueueForRuntimeStream(StreamQueueMaps& maps, uint64_t stream
+   }
+ }
+ 
+-inline StreamQueueMaps buildStreamQueueMaps(const std::vector<rocprofBase*>& rows) {
++template <class Rows>
++inline StreamQueueMaps buildStreamQueueMaps(const Rows& rows) {
+   StreamQueueMaps maps;
+   std::unordered_map<uint64_t, uint64_t> asyncQueueByCorrelation;
+   std::unordered_set<uint64_t> ambiguousCorrelations;
+ 
+-  for (const auto* item : rows) {
++  for (const auto& row : rows) {
++    const rocprofBase* item = rowPtr(row);
+     const uint64_t streamId = runtimeStreamId(item);
+     if (streamId != 0) {
+       maps.runtimeStreamByCorrelation[item->id] = streamId;
+@@ -86,7 +107,8 @@ inline StreamQueueMaps buildStreamQueueMaps(const std::vector<rocprofBase*>& row
+     }
+   }
+ 
+-  for (const auto* item : rows) {
++  for (const auto& row : rows) {
++    const rocprofBase* item = rowPtr(row);
+     const uint64_t streamId = runtimeStreamId(item);
+     if (streamId == 0 || ambiguousCorrelations.count(item->id) > 0) {
+       continue;
+@@ -100,13 +122,14 @@ inline StreamQueueMaps buildStreamQueueMaps(const std::vector<rocprofBase*>& row
+   return maps;
+ }
+ 
+-template <class IsAsyncCopy>
+-void backfillAsyncCopyStreams(std::vector<rocprofBase*>& rows, IsAsyncCopy isAsyncCopy) {
++template <class Rows, class IsAsyncCopy>
++void backfillAsyncCopyStreams(Rows& rows, IsAsyncCopy isAsyncCopy) {
+   const auto maps = buildStreamQueueMaps(rows);
+   if (maps.runtimeStreamByCorrelation.empty() || maps.asyncQueueByRuntimeStream.empty()) {
+     return;
+   }
+-  for (auto* item : rows) {
++  for (auto& row : rows) {
++    rocprofBase* item = rowPtr(row);
+     if (item->type != ROCTRACER_ACTIVITY_ASYNC) {
+       continue;
+     }
+diff --git a/libkineto/src/RocprofLogger.cpp b/libkineto/src/RocprofLogger.cpp
+index 3c23e9786223ede22adbd37d29db21dc20a46259..b212759aa91e751ee7c43f152db71b898ac07671 100644
+--- a/libkineto/src/RocprofLogger.cpp
++++ b/libkineto/src/RocprofLogger.cpp
+@@ -586,7 +586,8 @@ void RocprofLogger::api_callback(
+             args.gridSize.y,
+             args.gridSize.z,
+             args.groupSize,
+-            args.stream);
++            args.stream,
++            std::string{});
+         insert_row_to_buffer(row);
+ 
+       }
+diff --git a/libkineto/src/RoctracerActivity.h b/libkineto/src/RoctracerActivity.h
+index 52777f738615c96e0fa57d2c5771a04e9c5f75cc..f40261b814e6862f67226766c640c21200f384b9 100644
+--- a/libkineto/src/RoctracerActivity.h
++++ b/libkineto/src/RoctracerActivity.h
+@@ -75,7 +75,7 @@ struct RoctracerActivity : public ITraceActivity {
+   }
+ 
+  protected:
+-  const T& activity_;
++  const T activity_;
+   const ITraceActivity* linked_{nullptr};
+   std::unordered_map<std::string, std::string> metadata_;
+ };
+diff --git a/libkineto/src/RoctracerActivityApi.cpp b/libkineto/src/RoctracerActivityApi.cpp
+index 575f2694a5bcc5fa18e66a7a65ca213b25f0f1df..cb17aca5d45d055ce211ba649cb3ce5d32d974b2 100644
+--- a/libkineto/src/RoctracerActivityApi.cpp
++++ b/libkineto/src/RoctracerActivityApi.cpp
+@@ -75,6 +75,7 @@ void RoctracerActivityApi::popCorrelationID(CorrelationFlowType type) {
+ }
+ 
+ void RoctracerActivityApi::setMaxBufferSize(int64_t size) {
++  (void)size;
+   // FIXME: implement?
+   // maxGpuBufferCount_ = 1 + size / kBufSize;
+ }
+@@ -146,7 +147,7 @@ int RoctracerActivityApi::processActivities(
+         !isLogged(ActivityType::CUDA_RUNTIME)) {
+       filtered = true;
+     } else {
+-      switch (reinterpret_cast<rocprofAsyncRow*>(item)->kind) {
++      switch (reinterpret_cast<rocprofAsyncRow*>(item.get())->kind) {
+         case HIP_OP_COPY_KIND_DEVICE_TO_HOST_:
+         case HIP_OP_COPY_KIND_HOST_TO_DEVICE_:
+         case HIP_OP_COPY_KIND_DEVICE_TO_DEVICE_:
+@@ -166,7 +167,7 @@ int RoctracerActivityApi::processActivities(
+           if (!isLogged(ActivityType::CONCURRENT_KERNEL))
+             filtered = true;
+           // Don't record barriers/markers
+-          if (reinterpret_cast<rocprofAsyncRow*>(item)->op == HIP_OP_ID_BARRIER)
++          if (reinterpret_cast<rocprofAsyncRow*>(item.get())->op == HIP_OP_ID_BARRIER)
+             filtered = true;
+           break;
+       }
+@@ -184,7 +185,7 @@ int RoctracerActivityApi::processActivities(
+         item->begin = libkineto::get_time_converter()(item->begin);
+         item->end = libkineto::get_time_converter()(item->end);
+       }
+-      handler(item);
++      handler(item.get());
+       ++count;
+     }
+   }
+diff --git a/libkineto/src/RoctracerActivity_inl.h b/libkineto/src/RoctracerActivity_inl.h
+index 6f1e7528c5f971466dc1e27850c2b4d2359da301..9fb01c896ee60de7dd17c7d95552282b266e88d0 100644
+--- a/libkineto/src/RoctracerActivity_inl.h
++++ b/libkineto/src/RoctracerActivity_inl.h
+@@ -161,11 +161,10 @@ inline const std::string RuntimeActivity<rocprofKernelRow>::metadataJson() const
+         R"JSON(
+     "kernel": "{}", )JSON",
+         demangle(hipKernelNameRefByPtr(raw().functionAddr, raw().stream)));
+-  } else if ((raw().function != nullptr)) {
++  } else if ((raw().function != nullptr)&&!raw().kernelName.empty()) {
+     kernel = fmt::format(
+         R"JSON(
+-    "kernel": "{}", )JSON",
+-        demangle(hipKernelNameRef(raw().function)));
++    "kernel": "{}", )JSON", raw().kernelName);
+   }
+   // cache grid and block so we can pass it into async activity (GPU track)
+   correlationToGrid[raw().id] = fmt::format(
+diff --git a/libkineto/src/RoctracerLogger.cpp b/libkineto/src/RoctracerLogger.cpp
+index b96d06f72fabbe0290cb59f2f0ba71bac5388fe8..85eb7a7b24955ba903e701be4ffce14558a9cb78 100644
+--- a/libkineto/src/RoctracerLogger.cpp
++++ b/libkineto/src/RoctracerLogger.cpp
+@@ -86,7 +86,7 @@ void RoctracerLogger::clearLogs() {
+   }
+ }
+ 
+-void RoctracerLogger::insert_row_to_buffer(rocprofBase* row) {
++void RoctracerLogger::insert_row_to_buffer(std::unique_ptr<rocprofBase> row) {
+   RoctracerLogger* dis = &singleton();
+   std::lock_guard<std::mutex> lock(dis->rowsMutex_);
+   if (dis->rows_.size() >= dis->maxBufferSize_) {
+@@ -95,7 +95,7 @@ void RoctracerLogger::insert_row_to_buffer(rocprofBase* row) {
+         << dis->maxBufferSize_ << ") - terminating tracing";
+     return;
+   }
+-  dis->rows_.push_back(row);
++  dis->rows_.push_back(std::move(row));
+ }
+ 
+ void RoctracerLogger::api_callback(
+@@ -103,6 +103,7 @@ void RoctracerLogger::api_callback(
+     uint32_t cid,
+     const void* callback_data,
+     void* arg) {
++  (void)arg;
+   RoctracerLogger* dis = &singleton();
+ 
+   if (domain == ACTIVITY_DOMAIN_HIP_API && dis->loggedIds_.contains(cid)) {
+@@ -127,7 +128,8 @@ void RoctracerLogger::api_callback(
+         {
+           s_flush.reportCorrelation(data->correlation_id);
+           auto& args = data->args.hipLaunchKernel;
+-          rocprofKernelRow* row = new rocprofKernelRow(
++          std::string kernelName = "";
++          auto row = std::make_unique<rocprofKernelRow>(
+               data->correlation_id,
+               domain,
+               cid,
+@@ -144,15 +146,17 @@ void RoctracerLogger::api_callback(
+               args.dimBlocks.y,
+               args.dimBlocks.z,
+               args.sharedMemBytes,
+-              args.stream);
+-          insert_row_to_buffer(row);
++              args.stream,
++              kernelName);
++          insert_row_to_buffer(std::move(row));
+         } break;
+         case HIP_API_ID_hipHccModuleLaunchKernel:
+         case HIP_API_ID_hipModuleLaunchKernel:
+         case HIP_API_ID_hipExtModuleLaunchKernel: {
+           s_flush.reportCorrelation(data->correlation_id);
+           auto& args = data->args.hipModuleLaunchKernel;
+-          rocprofKernelRow* row = new rocprofKernelRow(
++          std::string kernelName = demangle(hipKernelNameRef(args.f));
++          auto row = std::make_unique<rocprofKernelRow>(
+               data->correlation_id,
+               domain,
+               cid,
+@@ -169,8 +173,9 @@ void RoctracerLogger::api_callback(
+               args.blockDimY,
+               args.blockDimZ,
+               args.sharedMemBytes,
+-              args.stream);
+-          insert_row_to_buffer(row);
++              args.stream,
++              kernelName);
++          insert_row_to_buffer(std::move(row));
+         } break;
+         case HIP_API_ID_hipLaunchCooperativeKernelMultiDevice:
+         case HIP_API_ID_hipExtLaunchMultiKernelMultiDevice:
+@@ -201,7 +206,7 @@ void RoctracerLogger::api_callback(
+ #endif
+           break;
+         case HIP_API_ID_hipMalloc: {
+-          rocprofMallocRow* row = new rocprofMallocRow(
++          auto row = std::make_unique<rocprofMallocRow>(
+               data->correlation_id,
+               domain,
+               cid,
+@@ -211,10 +216,10 @@ void RoctracerLogger::api_callback(
+               endTime,
+               data->args.hipMalloc.ptr__val,
+               data->args.hipMalloc.size);
+-          insert_row_to_buffer(row);
++          insert_row_to_buffer(std::move(row));
+         } break;
+         case HIP_API_ID_hipFree: {
+-          rocprofMallocRow* row = new rocprofMallocRow(
++          auto row = std::make_unique<rocprofMallocRow>(
+               data->correlation_id,
+               domain,
+               cid,
+@@ -224,11 +229,11 @@ void RoctracerLogger::api_callback(
+               endTime,
+               data->args.hipFree.ptr,
+               0);
+-          insert_row_to_buffer(row);
++          insert_row_to_buffer(std::move(row));
+         } break;
+         case HIP_API_ID_hipMemcpy: {
+           auto& args = data->args.hipMemcpy;
+-          rocprofCopyRow* row = new rocprofCopyRow(
++          auto row = std::make_unique<rocprofCopyRow>(
+               data->correlation_id,
+               domain,
+               cid,
+@@ -242,12 +247,12 @@ void RoctracerLogger::api_callback(
+               args.kind,
+               static_cast<hipStream_t>(0) // use placeholder?
+           );
+-          insert_row_to_buffer(row);
++          insert_row_to_buffer(std::move(row));
+         } break;
+         case HIP_API_ID_hipMemcpyAsync:
+         case HIP_API_ID_hipMemcpyWithStream: {
+           auto& args = data->args.hipMemcpyAsync;
+-          rocprofCopyRow* row = new rocprofCopyRow(
++          auto row = std::make_unique<rocprofCopyRow>(
+               data->correlation_id,
+               domain,
+               cid,
+@@ -260,10 +265,10 @@ void RoctracerLogger::api_callback(
+               args.sizeBytes,
+               args.kind,
+               args.stream);
+-          insert_row_to_buffer(row);
++          insert_row_to_buffer(std::move(row));
+         } break;
+         default: {
+-          rocprofRow* row = new rocprofRow(
++          auto row = std::make_unique<rocprofRow>(
+               data->correlation_id,
+               domain,
+               cid,
+@@ -271,7 +276,7 @@ void RoctracerLogger::api_callback(
+               systemThreadId(),
+               startTime,
+               endTime);
+-          insert_row_to_buffer(row);
++          insert_row_to_buffer(std::move(row));
+         } break;
+       } // switch
+       // External correlation
+@@ -292,6 +297,7 @@ void RoctracerLogger::activity_callback(
+     const char* begin,
+     const char* end,
+     void* arg) {
++  (void)arg;
+   // Log latest completed correlation id.  Used to ensure we have flushed all
+   // data on stop
+   std::unique_lock<std::mutex> lock(s_flush.mutex_);
+@@ -302,20 +308,24 @@ void RoctracerLogger::activity_callback(
+     if (record->correlation_id > s_flush.maxCompletedCorrelationId_) {
+       s_flush.maxCompletedCorrelationId_ = record->correlation_id;
+     }
+-    rocprofAsyncRow* row = new rocprofAsyncRow(
+-        record->correlation_id,
+-        record->domain,
+-        record->kind,
+-        record->op,
+-        record->device_id,
+-        record->queue_id,
+-        record->begin_ns,
+-        record->end_ns,
+-        ((record->kind == HIP_OP_DISPATCH_KIND_KERNEL_) ||
+-         (record->kind == HIP_OP_DISPATCH_KIND_TASK_))
+-            ? demangle(record->kernel_name)
+-            : std::string());
+-    insert_row_to_buffer(row);
++    // Skip barrier/marker records - they are filtered out during activity
++    // processing and only add unnecessary allocation overhead
++    if (record->op != HIP_OP_ID_BARRIER) {
++      auto row = std::make_unique<rocprofAsyncRow>(
++          record->correlation_id,
++          record->domain,
++          record->kind,
++          record->op,
++          record->device_id,
++          record->queue_id,
++          record->begin_ns,
++          record->end_ns,
++          ((record->kind == HIP_OP_DISPATCH_KIND_KERNEL_) ||
++           (record->kind == HIP_OP_DISPATCH_KIND_TASK_))
++              ? demangle(record->kernel_name)
++              : std::string());
++      insert_row_to_buffer(std::move(row));
++    }
+     roctracer_next_record(record, &record);
+   }
+ }
+diff --git a/libkineto/src/RoctracerLogger.h b/libkineto/src/RoctracerLogger.h
+index 5b0202358278c8b7c48bb27da6e3f0b7800f0c44..c7c5674c6e8830a8adad49600f9b51220bb55443 100644
+--- a/libkineto/src/RoctracerLogger.h
++++ b/libkineto/src/RoctracerLogger.h
+@@ -99,7 +99,7 @@ class RoctracerLogger {
+   void endTracing();
+ 
+   roctracer_pool_t* hccPool_{NULL};
+-  static void insert_row_to_buffer(rocprofBase* row);
++  static void insert_row_to_buffer(std::unique_ptr<rocprofBase> row);
+   static void api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void* arg);
+   static void activity_callback(const char* begin, const char* end, void* arg);
+ 
+@@ -107,7 +107,7 @@ class RoctracerLogger {
+ 
+   // Api callback data
+   uint32_t maxBufferSize_{5000000}; // 5M GPU runtime/kernel events.
+-  std::vector<rocprofBase*> rows_;
++  std::vector<std::unique_ptr<rocprofBase>> rows_;
+   std::mutex rowsMutex_;
+ 
+   // This vector collects pairs of correlationId and their respective
+diff --git a/libkineto/src/init.cpp b/libkineto/src/init.cpp
+index 809672c7207a2628cb4ed36d44b65a409f023809..fe44e5db013260197fef1e2bca6c3aaefebf58b4 100644
+--- a/libkineto/src/init.cpp
++++ b/libkineto/src/init.cpp
+@@ -23,7 +23,7 @@
+ #include "CuptiRangeProfiler.h"
+ #include "EventProfilerController.h"
+ #endif
+-#ifdef HAS_ROCTRACER
++#if defined(HAS_ROCTRACER) && !defined(ROCTRACER_FALLBACK)
+ #include "RocprofLogger.h"
+ #endif
+ #ifdef HAS_XPUPTI
+@@ -167,7 +167,7 @@ void libkineto_init(bool cpuOnly, [[maybe_unused]] bool logOnError) {
+   }
+ #endif // HAS_CUPTI
+ 
+-#ifdef HAS_ROCTRACER
++#if defined(HAS_ROCTRACER) && !defined(ROCTRACER_FALLBACK)
+   if (!cpuOnly) {
+     RocprofLogger::ensureRegistered();
+   }
+diff --git a/libkineto/src/output_json.cpp b/libkineto/src/output_json.cpp
+index ccd70efc3cfb179bb3ae4af347d8bd20e5abfe37..31428e4f87b361e69d80d2dd9078e97b72eca23c 100644
+--- a/libkineto/src/output_json.cpp
++++ b/libkineto/src/output_json.cpp
+@@ -479,6 +479,10 @@ ChromeTraceLogger::ChromeTraceLogger(const std::string& traceFileName) {
+   fileName_ = traceFileName.empty() ? defaultFileName() : traceFileName;
+   traceOf_.clear(std::ios_base::badbit);
+   openTraceFile();
++  const char* be = std::getenv("KINETO_USE_BE");
++  if (be && be[0] != '\0' && std::string(be) != "0") {
++    beSlices_ = true;
++  }
+ }
+ 
+ void ChromeTraceLogger::handleDeviceInfo(const DeviceInfo& info, int64_t time) {
+@@ -855,14 +859,45 @@ void ChromeTraceLogger::handleActivity(const libkineto::ITraceActivity& op) {
+   sanitizeForNonReadableChars(op_name);
+ 
+   ts = transToRelativeTime(ts);
+-  writeCompleteEvent(
+-      /*cat=*/toString(op.type()),
+-      /*name=*/op_name,
+-      /*pid=*/device,
+-      /*tid=*/sanitizeTid(resource),
+-      /*ts=*/ts,
+-      /*dur=*/duration,
+-      /*args=*/args);
++  if (beSlices_) {
++    int64_t end_ts = ts + duration;
++    if (end_ts < ts) {
++      end_ts = ts;
++    }
++    fmt::print(traceOf_, R"JSON(
++  {{
++    "ph": "B",
++    "cat": "{}",
++    "name": "{}",
++    "pid": {},
++    "tid": {},
++    "ts": {}
++    {}
++  }},)JSON",
++        toString(op.type()), op_name, device, sanitizeTid(resource),
++        fmtTs(ts), args.renderField());
++    fmt::print(traceOf_, R"JSON(
++  {{
++    "ph": "E",
++    "cat": "{}",
++    "name": "{}",
++    "pid": {},
++    "tid": {},
++    "ts": {}
++    {}
++  }},)JSON",
++        toString(op.type()), op_name, device, sanitizeTid(resource),
++        fmtTs(end_ts), args.renderField());
++  } else {
++    writeCompleteEvent(
++        /*cat=*/toString(op.type()),
++        /*name=*/op_name,
++        /*pid=*/device,
++        /*tid=*/sanitizeTid(resource),
++        /*ts=*/ts,
++        /*dur=*/duration,
++        /*args=*/args);
++  }
+   if (op.flowId() > 0) {
+     handleGenericLink(op);
+   }
+diff --git a/libkineto/src/output_json.h b/libkineto/src/output_json.h
+index 631ce0dbd8fd3d7f0384cdb80ce6c3763e1fcf0a..57c7d796ba8f4d3d27fb2cff565bd299c93377c5 100644
+--- a/libkineto/src/output_json.h
++++ b/libkineto/src/output_json.h
+@@ -204,7 +204,7 @@ class ChromeTraceLogger : public libkineto::ActivityLogger {
+   // pg_name, value is pgConfig that will be used to populate pg_config in
+   // distributedInfo of trace
+   std::unordered_map<std::string, pgConfig> pgMap_ = {};
+-
++  bool beSlices_ = false;
+   // Offset added to stream ID for CUDA_SYNC events to place them on a
+   // separate row from kernel events in the Chrome Trace JSON output.
+   static constexpr int64_t kSyncStreamTidOffset = 1000000;
