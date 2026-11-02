@@ -197,13 +197,11 @@ pip3 install xdoctest==1.1.3 \
     pytest==8.1.1 \
     pytest-timeout \
     Pillow==10.0.1 \
-    numpy==1.24.3 \
     mypy==1.8.0 \
     jmespath==1.0.1 \
     Jinja2==3.1.3 \
     expecttest==0.2.1 \
     tlparse==0.3.5 \
-    numba==0.60.0 \
     sympy==1.13.3 \
     MonkeyType \
     -i https://mirrors.huaweicloud.com/artifactory/pypi-public/simple \

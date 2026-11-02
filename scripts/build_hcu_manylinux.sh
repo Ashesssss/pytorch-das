@@ -40,7 +40,7 @@ if [ -z "${TORCH_LOCATION}" ]; then
     exit 1
 fi
 export TORCH_LOCATION
-export LD_LIBRARY_PATH="${TORCH_LOCATION}/torch/lib:${MKL_LIB_DIR}:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${TORCH_LOCATION}/torch/lib:${ROCM_PATH}/magma/lib:${MKL_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 
 python3 -m pip install patchelf auditwheel
 PLATFORM=$(ldd --version | awk '{print $NF}' | head -n1 | awk -F "." '{print "manylinux_"$1"_"$2"_x86_64"}')
