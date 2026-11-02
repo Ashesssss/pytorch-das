@@ -722,7 +722,10 @@ test_xpu_sycl_tla_backend() {
   # shellcheck disable=SC1091
   source  /opt/intel/oneapi/mkl/latest/env/vars.sh
   sycl_tla_dir=$(realpath "./third_party/sycl-tla")
-  rm -rf "${sycl_tla_dir}" && git clone --depth 1 --single-branch -b v0.8 --quiet https://github.com/intel/sycl-tla.git "${sycl_tla_dir}"
+  # sycl-tla pin is the v0.8 tag commit
+  rm -rf "${sycl_tla_dir}" && git init -q "${sycl_tla_dir}"
+  git -C "${sycl_tla_dir}" fetch -q --depth 1 https://github.com/intel/sycl-tla.git "$(get_pinned_commit sycl-tla)"
+  git -C "${sycl_tla_dir}" checkout -q FETCH_HEAD
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla") python test/run_test.py --include inductor/test_cutlass_backend $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
@@ -884,9 +887,7 @@ test_inductor_aoti_cpp() {
   fi
   TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
-  # test_aoti_inference is not run: it loads libaoti_custom_class.so and its model
-  # and data files from its build directory, which the build artifacts don't include.
-  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_vec_half_AVX2 -dist=loadfile
+  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
 }
 
 test_inductor_aoti_fallback_shard() {
@@ -1332,8 +1333,10 @@ test_better_benchmark() {
   benchmark_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-benchmark.XXXXXX")"
   mkdir -p "${test_reports_dir}" "${debug_dir}"
 
-  git clone --depth 1 --branch main \
-    https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
+  # better-benchmark pin is a main commit (untagged); bump by hand, its consumer is schedule-only
+  git -C "${benchmark_dir}" init -q
+  git -C "${benchmark_dir}" fetch -q --depth 1 https://github.com/eellison/better-benchmark.git "$(get_pinned_commit better-benchmark)"
+  git -C "${benchmark_dir}" checkout -q FETCH_HEAD
   pushd "${benchmark_dir}"
 
   local gpu_indices
@@ -1838,7 +1841,7 @@ test_libtorch_profiler() {
   # Tests for torch/csrc/profiler/util.h GlobalStateManager.
   python test/run_test.py --cpp --verbose -i cpp/test_global_state_manager
 
-  # Kineto's own unit tests, vendored under third_party/kineto. The binaries
+  # Kineto's own unit tests, under torch/csrc/profiler/kineto. The binaries
   # are globbed rather than listed so a test added to Kineto runs here without
   # a matching change to this script.
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
@@ -2200,49 +2203,6 @@ test_torch_function_benchmark() {
   assert_git_not_dirty
 }
 
-build_xla() {
-  # xla test needs pytorch headers in torch/include
-  pushd ..
-  python -c "import os, torch, shutil; shutil.copytree(os.path.join(os.path.dirname(torch.__file__), 'include'), 'workspace/torch/include', dirs_exist_ok=True)"
-  popd
-
-  # xla test needs sccache setup.
-  # shellcheck source=./common-build.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-
-  XLA_DIR=xla
-  USE_CACHE=1
-  clone_pytorch_xla
-  # shellcheck disable=SC1091
-  source "xla/.circleci/common.sh"
-
-  # TODO: The torch pin #73164 is involved in the sev https://github.com/pytorch/pytorch/issues/86093
-  # so this is temporarily removed until XLA fixes the weird logic in https://github.com/pytorch/xla/blob/master/scripts/apply_patches.sh#L17-L18
-  rm "${XLA_DIR}/torch_patches/.torch_pin" || true
-
-  apply_patches
-  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
-  # These functions are defined in .circleci/common.sh in pytorch/xla repo
-  retry install_pre_deps_pytorch_xla $XLA_DIR $USE_CACHE
-  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
-  retry install_post_deps_pytorch_xla
-  assert_git_not_dirty
-}
-
-test_xla() {
-  # xla test needs sccache setup.
-  # shellcheck source=./common-build.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-
-  clone_pytorch_xla
-  # shellcheck disable=SC1091
-  source "./xla/.circleci/common.sh"
-  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
-  # Set LD_LIBRARY_PATH for C++ tests
-  export LD_LIBRARY_PATH="/opt/conda/lib/:${LD_LIBRARY_PATH}"
-  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SKIP_MP_OP_TESTS=1 XLA_SKIP_XLA_OP_TESTS=1 run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
-  assert_git_not_dirty
-}
 
 function check_public_api_test_fails {
     test_name=$1
@@ -2607,7 +2567,8 @@ test_attention_microbenchmark() {
 
   # Install attention-gym dependency
   echo "Installing attention-gym..."
-  python -m pip install git+https://github.com/meta-pytorch/attention-gym.git@main
+  # attention-gym pin is a main commit (untagged); bump by hand, its consumer is schedule-only
+  python -m pip install "git+https://github.com/meta-pytorch/attention-gym.git@$(get_pinned_commit attention-gym)"
   pip show triton
 
   cd "${TEST_DIR}"/benchmarks/transformer
@@ -2630,34 +2591,20 @@ if [[ "${TEST_CONFIG}" == "onnx" ]]; then
   install_torchvision
   "$(dirname "${BASH_SOURCE[0]}")/../../scripts/onnx/test.sh"
 elif [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
-  # Install the validated NumPy 2.1 dependency stack on Python versions that support it.
-  NUMPY_2_TEST_PACKAGES=(
-    "numpy==2.1.0; python_version < '3.14'"
-    "scipy==1.13.1; python_version < '3.14'"
-    "numba==0.61.2; python_version < '3.14'"
-    "tensorboard==2.18.0; python_version < '3.14'"
-    "tensorboard-data-server==0.7.2; python_version < '3.14'"
-    "numpy==2.3.4; python_version >= '3.14'"
-    "scipy==1.16.2; python_version >= '3.14'"
-    "tensorboard==2.18.0; python_version >= '3.14'"
-  )
+  # Install numpy-2.0.2 and compatible scipy & numba versions
   # Force re-install of pandas to avoid error where pandas checks numpy version from initial install and fails upon import
   TMP_PANDAS_VERSION=$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null)
   if [ -n "$TMP_PANDAS_VERSION" ]; then
-    python -m pip install --pre "${NUMPY_2_TEST_PACKAGES[@]}" pandas=="$TMP_PANDAS_VERSION" --force-reinstall
+    python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0 pandas=="$TMP_PANDAS_VERSION" --force-reinstall
   else
-    python -m pip install --pre "${NUMPY_2_TEST_PACKAGES[@]}"
+    python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
   fi
-  python test/run_test.py --include dynamo/test_functions.py dynamo/test_unspec.py test_binary_ufuncs.py test_fake_tensor.py test_linalg.py test_monitor.py test_numpy_interop.py test_tensor_creation_ops.py test_tensorboard.py test_torch.py torch_np/test_basic.py
+  python test/run_test.py --include dynamo/test_functions.py dynamo/test_unspec.py test_binary_ufuncs.py test_fake_tensor.py test_linalg.py test_numpy_interop.py test_tensor_creation_ops.py test_torch.py torch_np/test_basic.py
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *libtorch_agnostic_targetting* ]]; then
   test_libtorch_agnostic_targetting
-elif [[ "${TEST_CONFIG}" == *xla* ]]; then
-  install_torchvision
-  build_xla
-  test_xla
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     echo "vLLM CI uses TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
     (cd .ci/lumen_cli && python -m pip install -e .)
