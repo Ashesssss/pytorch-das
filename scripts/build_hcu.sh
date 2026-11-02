@@ -214,12 +214,13 @@ if [ "${MAGMA_ENABLED}" = "1" ]; then
     fi
     echo ">>>>>>>>>>LOAD MAGMA<<<<<<<<<<"
     cd "${ROCM_PATH}"
-    wget "${MAGMA_URL}"
+    MAGMA_ARCHIVE=magma-package.tar.gz
+    wget -O "${MAGMA_ARCHIVE}" "${MAGMA_URL}"
     rm -rf magma
-    tar -zxf magma*.tar.gz
-    rm -f magma*.tar.gz
+    tar -zxf "${MAGMA_ARCHIVE}"
+    rm -f "${MAGMA_ARCHIVE}"
     if [ ! -d magma ]; then
-        MAGMA_EXTRACT_DIR=$(find . -maxdepth 1 -type d -name 'magma*' ! -name magma | sort | tail -n 1)
+        MAGMA_EXTRACT_DIR=$(find . -maxdepth 1 -type d -iname 'magma*' ! -name magma | sort | tail -n 1)
         if [ -z "${MAGMA_EXTRACT_DIR}" ]; then
             echo "ERROR: cannot find extracted MAGMA directory under /opt/dtk" >&2
             exit 1
