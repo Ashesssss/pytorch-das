@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 __all__ = ["dynamic_metadata", "dynamic_wheel"]
 
 BASE_DEPENDENCIES = [
+    "cloudpickle==3.1.2",
     "filelock",
     "typing-extensions>=4.15.0",
     "setuptools>=77.0.3",
