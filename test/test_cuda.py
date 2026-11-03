@@ -92,6 +92,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     load_tests,
+    MI300_ARCH,
     MI350_ARCH,
     parametrize,
     recover_orig_fp32_precision,
@@ -115,6 +116,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW,
     TestCase,
 )
+from torch.utils.cpp_extension import PYTORCH_DTK_VERSION
 from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.viz._cycles import observe_tensor_cycles
@@ -8894,12 +8896,126 @@ print(value, end="")
         finally:
             random.setstate(state)
 
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/hcusmi is not available")
+    @unittest.skipIf(not torch.cuda._HAS_HCUSMI, "hcusmi is not installed")
+    def test_hcusmi_get_handler(self):
+        if not torch.version.hip:
+            self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
+        else:
+            handler = torch.cuda._get_hcusmi_handler()
+            self.assertIsNotNone(handler)
+
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/hcusmi is not available")
+    @unittest.skipIf(not torch.cuda._HAS_HCUSMI, "hcusmi is not installed")
+    def test_hcusmi_temperature(self):
+        self.assertTrue(0 <= torch.cuda.temperature() <= 150)
+
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/hcusmi is not available")
+    @unittest.skipIf(not torch.cuda._HAS_HCUSMI, "hcusmi is not installed")
+    def test_hcusmi_device_memory_used(self):
+        torch.cuda.synchronize()
+        gc.collect()
+        torch.cuda.empty_cache()
+        a = torch.cuda.device_memory_used()
+        num_bytes = 512 * 1024**2
+        _ = torch.empty(num_bytes, dtype=torch.int8, device="cuda")
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        b = torch.cuda.device_memory_used()
+        mem_bytes = b - a
+        self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
+
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/hcusmi is not available")
+    @unittest.skipIf(not torch.cuda._HAS_HCUSMI, "hcusmi is not installed")
+    def test_hcusmi_power_draw(self):
+        self.assertTrue(torch.cuda.power_draw() >= 0)
+
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/hcusmi is not available")
+    @unittest.skipIf(not torch.cuda._HAS_HCUSMI, "hcusmi is not installed")
+    @skipIfRocmArch(MI300_ARCH)
+    def test_hcusmi_clock_speed(self):
+        self.assertTrue(torch.cuda.clock_rate() >= 0)
+
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/hcusmi is not available")
+    @unittest.skipIf(not torch.cuda._HAS_HCUSMI, "hcusmi is not installed")
+    @unittest.skipIf(not TEST_WITH_ROCM, "hcusmi specific test")
+    def test_raw_hcusmi_device_count(self):
+        import hcusmi
+        hcusmi.hcusmi_init()
+        raw_device_cnt = len(hcusmi.hcusmi_get_processor_handles())
+        self.assertEqual(torch.cuda._raw_device_count_hcusmi(), raw_device_cnt)
+
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/hcusmi is not available")
+    @unittest.skipIf(not torch.cuda._HAS_HCUSMI, "hcusmi is not installed")
+    @unittest.skipIf(not TEST_WITH_ROCM, "hcusmi specific test")
+    def test_raw_hcusmi_device_uuids(self):
+        """
+        This unit test will extract a list of UUIDs for each GPU using
+        rocminfo information, and check whether each UUID is present in
+        the output from `_raw_device_uuid_hcusmi` this allows us to test
+        that the pytorch call is returning a correct list of UUIDs.
+        """
+        cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid:.*GPU-//'"
+        uuids = subprocess.check_output(cmd, shell=True, text=True).strip().split("\n")
+        uuids = [s.strip() for s in uuids]
+        raw_uuids = torch.cuda._raw_device_uuid_hcusmi()
+        for uuid in uuids:
+            matching = True
+            if not any(uuid in raw_id for raw_id in raw_uuids):
+                matching = False
+        self.assertEqual(True, matching)
+
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/hcusmi is not available")
+    @unittest.skipIf(not torch.cuda._HAS_HCUSMI, "hcusmi is not installed")
+    @unittest.skipIf(not TEST_WITH_ROCM, "hcusmi specific test")
+    def test_hcusmi_uuid_visible_devices(self):
+        """
+        This unit test will simulate an environment where a UUID is passed
+        via CUDA/HIP_VISIBLE_DEVICES and ensure that the correct device count
+        is returned.
+        """
+        test_script = """\
+import torch
+import os
+print(f"{torch.cuda.device_count()}")
+        """
+        cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid://'"
+        uuids = subprocess.check_output(cmd, shell=True, text=True).strip().split("\n")
+        uuids = [s.strip() for s in uuids]
+
+        custom_envs = []
+        for uuid in uuids:
+            custom_envs.append(
+                {"CUDA_VISIBLE_DEVICES": f"{uuid}", "HIP_VISIBLE_DEVICES": None}
+            )
+            custom_envs.append(
+                {"HIP_VISIBLE_DEVICES": f"{uuid}", "CUDA_VISIBLE_DEVICES": None}
+            )
+
+        for env_config in custom_envs:
+            env = os.environ.copy()
+            for key, value in env_config.items():
+                if value is None:
+                    env.pop(key, None)
+                else:
+                    env[key] = value
+            r = (
+                subprocess.check_output([sys.executable, "-c", test_script], env=env)
+                .decode("ascii")
+                .strip()
+            )
+            self.assertEqual("1", r)
+
+
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_nvml_get_handler(self):
         if not torch.version.hip:
             self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
         else:
-            self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
+            if torch.cuda._HAS_HCUSMI:
+                self.assertTrue(torch.cuda._get_hcusmi_handler() is not None)
+            else:
+                self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @skipIfNonPrimaryRocmPartition
@@ -8943,6 +9059,7 @@ print(value, end="")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
+    @patch.object(torch.cuda, "_HAS_HCUSMI", False)
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_power_draw_amdsmi_milliwatts(self):
         """power_draw() converts AMD SMI socket power from watts to milliwatts."""
@@ -8968,6 +9085,10 @@ print(value, end="")
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
+    @unittest.skipIf(
+        TEST_WITH_ROCM and torch.cuda._HAS_HCUSMI,
+        "HCuSMI is available; use HCU test",
+    )
     def test_raw_amdsmi_device_count(self):
         """
         This unit test will verify if the number of GPUs shown in `amd-smi
@@ -8984,6 +9105,10 @@ print(value, end="")
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180227")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
+    @unittest.skipIf(
+        TEST_WITH_ROCM and torch.cuda._HAS_HCUSMI,
+        "HCuSMI is available; use HCU test",
+    )
     def test_raw_amdsmi_device_uuids(self):
         """
         This unit test will extract a list of UUIDs for each GPU using

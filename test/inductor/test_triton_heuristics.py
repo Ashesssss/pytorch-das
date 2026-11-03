@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 import sympy
 
 import torch
+from torch.utils.cpp_extension import PYTORCH_DTK_VERSION
 from torch._dynamo.testing import rand_strided
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
@@ -70,6 +71,32 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
+
+
+TEST_WITH_HCUSMI = (torch.version.hip is not None and PYTORCH_DTK_VERSION is not None and torch.cuda._HAS_HCUSMI)
+
+@triton.jit
+def hcu_sqr_kernel(in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(0)
+    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    data = tl.load(in_ptr + offsets, mask=offsets < numel)
+    sqr = data * data
+    tl.store(out_ptr + offsets, sqr, mask=offsets < numel)
+
+
+@functools.lru_cache
+def get_autotuned_hcu_sqr_kernel():
+    return triton.autotune(
+        configs=[
+            triton.Config(
+                {
+                    "BLOCK_SIZE": 64,
+                    "waves_per_eu": 3,
+                }
+            )
+        ],
+        key=[],
+    )(hcu_sqr_kernel)
 
 
 class _FindNamesProbe:
@@ -776,6 +803,36 @@ class TestTritonHeuristics(TestCase):
         ref = fn(x)
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
+
+    @unittest.skipIf(not TEST_WITH_HCUSMI, "requires HCU environment with HCuSMI")
+    @runOnRocm
+    def test_hcu_special_config_args(self):
+        """
+        Verify that HCU Triton configs accept special config kwargs such as
+        waves_per_eu when the kwarg is not present in the kernel signature.
+        """
+
+        @torch.library.triton_op(
+            "test_triton_heuristics::hcu_triton_sqr", mutates_args=()
+        )
+        def hcu_triton_sqr(x: torch.Tensor) -> torch.Tensor:
+            y = torch.empty_like(x)
+
+            def grid(meta):
+                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
+
+            torch.library.wrap_triton(get_autotuned_hcu_sqr_kernel())[grid](
+                x, y, x.numel()
+            )
+
+        def fn(x):
+            return hcu_triton_sqr(x)
+
+        x = torch.randn(32, device=GPU_TYPE)
+        ref = fn(x)
+        res = torch.compile(fn)(x)
+        self.assertEqual(ref, res)
+
 
     @runOnRocm
     def test_rocm_exhaustive_configs_do_not_enumerate_num_stages(self):
