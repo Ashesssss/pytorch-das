@@ -1551,9 +1551,19 @@ if(USE_ROCM)
         find_library(IBVERBS ibverbs)
         find_library(MLX5 mlx5)
         if(NOT AMDHIP64 OR NOT IBVERBS OR NOT MLX5)
+          set(_torch_rocshmem_missing_libraries)
+          if(NOT AMDHIP64)
+            list(APPEND _torch_rocshmem_missing_libraries "HIP runtime")
+          endif()
+          if(NOT IBVERBS)
+            list(APPEND _torch_rocshmem_missing_libraries "ibverbs")
+          endif()
+          if(NOT MLX5)
+            list(APPEND _torch_rocshmem_missing_libraries "mlx5")
+          endif()
           message(WARNING
             "rocSHMEM found but required link libraries are missing: "
-            "AMDHIP64=${AMDHIP64}, IBVERBS=${IBVERBS}, MLX5=${MLX5}. "
+            "${_torch_rocshmem_missing_libraries}. "
             "Building without rocSHMEM support.")
         else()
           message(STATUS "rocSHMEM found, building with rocSHMEM support for arches: ${_torch_rocshmem_build_arches}")
