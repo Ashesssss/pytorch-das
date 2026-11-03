@@ -880,7 +880,7 @@ test_inductor_shard() {
 test_inductor_aoti_cpp() {
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     # We need to hipify before building again
-    python3 tools/amd_build/build_amd.py
+    python3 tools/hcu_build/build_hcu.py
   fi
   TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 

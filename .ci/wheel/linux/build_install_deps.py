@@ -90,8 +90,8 @@ def main() -> None:
     pip_install("-q", "auditwheel==6.4.2")
 
     if "rocm" in os.environ.get("DESIRED_CUDA", ""):
-        print(f"Running build_amd.py at {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        subprocess.run([sys.executable, "tools/amd_build/build_amd.py"], check=True)
+        print(f"Running build_hcu.py at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        subprocess.run([sys.executable, "tools/hcu_build/build_hcu.py"], check=True)
 
 
 if __name__ == "__main__":

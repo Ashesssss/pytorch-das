@@ -505,7 +505,7 @@ def main() -> None:
         # the wheel layout), so no MAGMA_HOME/USE_MAGMA handling is needed here.
         rocm_home = discover_rocm_home()
         env_out["ROCM_HOME"] = rocm_home
-        # DESIRED_CUDA is "rocmX.Y.Z" -- normalize so build_amd.py and
+        # DESIRED_CUDA is "rocmX.Y.Z" -- normalize so build_hcu.py and
         # downstream tools see the rocm-prefixed form (matches build_rocm.sh).
         desired = os.environ.get("DESIRED_CUDA", "")
         if desired and not desired.startswith("rocm"):

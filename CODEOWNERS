@@ -1102,7 +1102,7 @@
 # /scripts/
 # /tools/
 # label: module: rocm
-/tools/amd_build/ @jeffdaily @jithunnair-amd
+/tools/hcu_build/ @jeffdaily @jithunnair-amd
 #
 # [infra_linting]
 # label: module: lint

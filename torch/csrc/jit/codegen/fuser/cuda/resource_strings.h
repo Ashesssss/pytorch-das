@@ -269,7 +269,7 @@ typedef __half half;
 #endif
 
 // NOTE [ ROCm JIT bfloat16 symbol collision ]
-// This file is excluded from hipify (see tools/amd_build/build_amd.py), so it
+// This file is excluded from hipify (see tools/hcu_build/build_hcu.py), so it
 // ships its own self-contained __nv_bfloat16 type plus the
 // __float2bfloat16/__bfloat162float conversions for the runtime-compiled fuser
 // kernel. Starting with ROCm 7.x, hiprtc auto-injects a runtime header

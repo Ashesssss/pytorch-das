@@ -83,7 +83,7 @@ Imported by every stage via
   path. These stay outside this tree because non-CD Windows CI shares them.
 - **Repo root.** `pyproject.toml` (the actual scikit-build-core build),
   `requirements-build.txt` + `requirements.txt` (build-time deps),
-  `tools/amd_build/build_amd.py` (Linux ROCm hipify), and `spin` /
+  `tools/hcu_build/build_hcu.py` (Linux ROCm hipify), and `spin` /
   `tools/clean.py` (the `spin clean` step).
 - **libtorch.** There is no separate libtorch build: the nightly libtorch
   zips are extracted from the wheels built here by
