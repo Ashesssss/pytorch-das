@@ -235,6 +235,7 @@ class ChromeTraceLogger : public libkineto::ActivityLogger {
   // pg_name, value is pgConfig that will be used to populate pg_config in
   // distributedInfo of trace
   std::unordered_map<std::string, pgConfig> pgMap_;
+  bool beSlices_ = false;
 
   // Offset added to stream ID for CUDA_SYNC events to place them on a
   // separate row from kernel events in the Chrome Trace JSON output.

@@ -157,16 +157,29 @@ elseif(KINETO_BACKEND STREQUAL "rocm")
   message(STATUS "ROCM minor: ${ROCM_VERSION_DEV_MINOR}")
   message(STATUS "ROCM patch: ${ROCM_VERSION_DEV_PATCH}")
 
-  # Kineto uses rocprofiler-sdk, which is supported on ROCm 7.0 and later.
-  # roctracer was the only pre-7.0 path and has been removed, so older ROCm
-  # versions are no longer supported.
-  if(ROCM_VERSION_DEV_MAJOR LESS 7)
-    message(FATAL_ERROR
-      "KINETO_BACKEND=rocm requires ROCm >= 7.0 (rocprofiler-sdk); detected "
-      "ROCm ${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}. "
-      "Upgrade ROCm or set KINETO_BACKEND=cpu.")
+  find_library(ROCPROFILER_SDK_LIBRARY NAMES rocprofiler-sdk
+    HINTS "${ROCM_SOURCE_DIR}/lib" "${ROCM_SOURCE_DIR}/lib64")
+  find_path(ROCPROFILER_SDK_INCLUDE_DIR NAMES rocprofiler-sdk/rocprofiler.h
+    HINTS ${ROCM_INCLUDE_DIRS} "${ROCM_SOURCE_DIR}/include")
+  if(ROCPROFILER_SDK_LIBRARY AND ROCPROFILER_SDK_INCLUDE_DIR
+      AND EXISTS "${ROCPROFILER_SDK_INCLUDE_DIR}/rocprofiler-sdk/cxx/name_info.hpp"
+      AND EXISTS "${ROCPROFILER_SDK_INCLUDE_DIR}/rocprofiler-sdk/version.h")
+    set(USE_ROCPROFILER_SDK ON)
+    message(STATUS "Building with: rocprofiler-sdk")
+  else()
+    set(USE_ROCPROFILER_SDK OFF)
+    find_path(ROCTRACER_INCLUDE_DIR NAMES roctracer.h
+      HINTS "${ROCM_SOURCE_DIR}/include/roctracer" "${ROCM_SOURCE_DIR}/roctracer/include"
+            ${ROCM_INCLUDE_DIRS})
+    find_library(ROCTRACER_LIBRARY NAMES roctracer64
+      HINTS "${ROCM_SOURCE_DIR}/lib" "${ROCM_SOURCE_DIR}/lib64"
+            "${ROCM_SOURCE_DIR}/roctracer/lib")
+    if(NOT ROCTRACER_LIBRARY OR NOT ROCTRACER_INCLUDE_DIR)
+      message(FATAL_ERROR
+        "Kineto requires rocprofiler-sdk headers/library or Roctracer headers/library under ${ROCM_SOURCE_DIR}")
+    endif()
+    message(STATUS "Building with: Roctracer fallback")
   endif()
-  message(STATUS "Building with: rocprofiler-sdk")
 elseif(KINETO_BACKEND STREQUAL "xpu")
   # XPU plugin
   add_subdirectory(src/plugin/xpupti)
@@ -185,8 +198,11 @@ elseif(KINETO_BACKEND STREQUAL "cuda")
   endif()
   message(STATUS " Building with cupti")
 elseif(KINETO_BACKEND STREQUAL "rocm")
-  get_filelist("get_libkineto_rocprofiler_srcs(with_api=False)" LIBKINETO_SRCS)
-  message(STATUS " Building with rocprofiler-sdk")
+  if(USE_ROCPROFILER_SDK)
+    get_filelist("get_libkineto_rocprofiler_srcs(with_api=False)" LIBKINETO_SRCS)
+  else()
+    get_filelist("get_libkineto_roctracer_srcs(with_api=False)" LIBKINETO_SRCS)
+  endif()
 elseif(KINETO_BACKEND STREQUAL "xpu")
   get_filelist("get_libkineto_xpupti_srcs(with_api=False)" LIBKINETO_SRCS)
   message(STATUS " Building with xpupti")
@@ -214,6 +230,9 @@ if(KINETO_BACKEND STREQUAL "cuda")
   list(APPEND KINETO_DEFINITIONS "HAS_CUPTI")
 elseif(KINETO_BACKEND STREQUAL "rocm")
   list(APPEND KINETO_DEFINITIONS "HAS_ROCTRACER")
+  if(NOT USE_ROCPROFILER_SDK)
+    list(APPEND KINETO_DEFINITIONS "ROCTRACER_FALLBACK")
+  endif()
   target_compile_definitions(kineto_base PRIVATE "__HIP_PLATFORM_AMD__")
 elseif(KINETO_BACKEND STREQUAL "xpu")
   if(MSVC)
@@ -315,8 +334,13 @@ if(KINETO_BACKEND STREQUAL "cuda")
 elseif(KINETO_BACKEND STREQUAL "rocm")
   target_include_directories(kineto_base SYSTEM PUBLIC
         $<BUILD_INTERFACE:${ROCM_INCLUDE_DIRS}>)
-  find_library(ROCPROF_LIBRARY NAMES librocprofiler-sdk.so HINTS
-    ${ROCM_SOURCE_DIR}/lib)
+  if(USE_ROCPROFILER_SDK)
+    set(ROCPROF_LIBRARY "${ROCPROFILER_SDK_LIBRARY}")
+    target_include_directories(kineto_base SYSTEM PUBLIC "${ROCPROFILER_SDK_INCLUDE_DIR}")
+  else()
+    set(ROCPROF_LIBRARY "${ROCTRACER_LIBRARY}")
+    target_include_directories(kineto_base SYSTEM PUBLIC "${ROCTRACER_INCLUDE_DIR}")
+  endif()
   target_link_libraries(kineto "${ROCPROF_LIBRARY}")
   target_link_libraries(kineto_base PUBLIC "${ROCPROF_LIBRARY}")
   find_library(KINETO_HIP_LIBRARY NAMES libamdhip64.so HINTS

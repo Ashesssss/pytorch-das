@@ -7,6 +7,9 @@
  */
 
 #pragma once
+#ifdef ROCTRACER_FALLBACK
+#include "RoctracerActivityApi.h"
+#else
 #ifdef HAS_ROCTRACER
 
 #include <atomic>
@@ -72,3 +75,5 @@ class RocprofActivityApi {
 
 } // namespace KINETO_NAMESPACE
 #endif
+
+#endif // ROCTRACER_FALLBACK

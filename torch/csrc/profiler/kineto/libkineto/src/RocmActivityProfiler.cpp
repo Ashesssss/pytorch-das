@@ -13,14 +13,22 @@
 #include <string>
 #include "DeviceUtil.h"
 
+#ifndef ROCTRACER_FALLBACK
 #include <rocprofiler-sdk/version.h>
+#else
+#include <roctracer.h>
+#endif
 
 #include "ActivityBuffers.h"
 #include "Config.h"
 #include "Logger.h"
 // RocprofActivity.h must stay in this .cpp only — its corresponding _inl.h has
 // inline functions referencing thread_local maps.
+#ifndef ROCTRACER_FALLBACK
 #include "RocprofActivity.h"
+#else
+#include "RoctracerActivity.h"
+#endif
 #include "ThreadUtil.h"
 
 using namespace std::chrono;
@@ -32,6 +40,7 @@ RocmActivityProfiler::RocmActivityProfiler(
     bool cpuOnly)
     : GenericActivityProfiler(cpuOnly), roc_(rocprof) {}
 
+#ifndef ROCTRACER_FALLBACK
 void RocmActivityProfiler::recordGpuVersions() {
   const auto rocprofVersion = fmt::format(
       "{}.{}", ROCPROFILER_VERSION_MAJOR, ROCPROFILER_VERSION_MINOR);
@@ -52,6 +61,30 @@ void RocmActivityProfiler::recordGpuVersions() {
   addVersionMetadata("hip_runtime_version", std::to_string(hipRuntimeVersion));
   addVersionMetadata("hip_driver_version", std::to_string(hipDriverVersion));
 }
+
+#else
+void RocmActivityProfiler::recordGpuVersions() {
+  const auto rocprofVersion = fmt::format(
+      "{}.{}", roctracer_version_major(), roctracer_version_minor());
+  int hipRuntimeVersion = 0, hipDriverVersion = 0;
+  CUDA_CALL(hipRuntimeGetVersion(&hipRuntimeVersion));
+  CUDA_CALL(hipDriverGetVersion(&hipDriverVersion));
+  LOG(INFO) << "HIP versions. Roctracer: " << rocprofVersion
+            << "; Runtime: " << hipRuntimeVersion
+            << "; Driver: " << hipDriverVersion;
+
+  LOGGER_OBSERVER_ADD_PERSISTENT_METADATA(
+      "roctracer_version", rocprofVersion);
+  LOGGER_OBSERVER_ADD_PERSISTENT_METADATA(
+      "hip_runtime_version", std::to_string(hipRuntimeVersion));
+  LOGGER_OBSERVER_ADD_PERSISTENT_METADATA(
+      "hip_driver_version", std::to_string(hipDriverVersion));
+  addVersionMetadata("roctracer_version", rocprofVersion);
+  addVersionMetadata("hip_runtime_version", std::to_string(hipRuntimeVersion));
+  addVersionMetadata("hip_driver_version", std::to_string(hipDriverVersion));
+}
+
+#endif
 
 void RocmActivityProfiler::setMaxGpuBufferSize(int64_t size) {
   roc_.setMaxBufferSize(size);

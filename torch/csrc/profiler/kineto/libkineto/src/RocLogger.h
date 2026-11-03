@@ -23,7 +23,12 @@
 #include <hip/hip_runtime_api.h>
 
 namespace libkineto {
+#ifdef ROCTRACER_FALLBACK
+class RoctracerActivityApi;
+using RocprofActivityApi = RoctracerActivityApi;
+#else
 class RocprofActivityApi;
+#endif
 }
 
 typedef uint64_t timestamp_t;
@@ -159,6 +164,7 @@ struct rocprofKernelRow : public rocprofRow {
   unsigned int workgroupZ;
   size_t groupSegmentSize;
   hipStream_t stream;
+  std::string kernelName;
 };
 
 struct rocprofCopyRow : public rocprofRow {

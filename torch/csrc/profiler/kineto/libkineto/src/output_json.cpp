@@ -7,6 +7,7 @@
  */
 
 #include "output_json.h"
+#include <cstdlib>
 
 #include <fmt/format.h>
 #include <fmt/ostream.h>
@@ -518,6 +519,8 @@ ChromeTraceLogger::ChromeTraceLogger(const std::string& traceFileName) {
   fileName_ = traceFileName.empty() ? defaultFileName() : traceFileName;
   traceOf_.clear(std::ios_base::badbit);
   openTraceFile();
+  const char* be = std::getenv("KINETO_USE_BE");
+  beSlices_ = be != nullptr && be[0] != '\0' && std::string(be) != "0";
 }
 
 void ChromeTraceLogger::handleDeviceInfo(const DeviceInfo& info, int64_t time) {
@@ -977,15 +980,24 @@ void ChromeTraceLogger::handleActivity(const libkineto::ITraceActivity& op) {
       : std::string{};
 
   ts = transToRelativeTime(ts);
-  writeCompleteEvent(
-      /*cat=*/toString(op.type()),
-      /*name=*/op_name,
-      /*pid=*/device,
-      /*tid=*/sanitizeTid(resource),
-      /*ts=*/ts,
-      /*dur=*/duration,
-      /*args=*/args,
-      /*extraFields=*/flowFields);
+  if (beSlices_ && !inlineInstructionFlow) {
+    const auto endTs = duration < 0 ? ts : ts + duration;
+    fmt::print(traceOf_, R"JSON(
+  {{"ph": "B", "cat": "{}", "name": "{}", "pid": {}, "tid": {}, "ts": {}{}}},
+  {{"ph": "E", "cat": "{}", "name": "{}", "pid": {}, "tid": {}, "ts": {}{}}},)JSON",
+        toString(op.type()), op_name, device, sanitizeTid(resource), fmtTs(ts), args.renderField(),
+        toString(op.type()), op_name, device, sanitizeTid(resource), fmtTs(endTs), args.renderField());
+  } else {
+    writeCompleteEvent(
+        /*cat=*/toString(op.type()),
+        /*name=*/op_name,
+        /*pid=*/device,
+        /*tid=*/sanitizeTid(resource),
+        /*ts=*/ts,
+        /*dur=*/duration,
+        /*args=*/args,
+        /*extraFields=*/flowFields);
+  }
   if (op.flowId() > 0 && !inlineInstructionFlow) {
     handleGenericLink(op);
   }

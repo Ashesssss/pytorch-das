@@ -207,3 +207,11 @@ KINETO_COMPILER_FLAGS = [
     "-Wno-unused-function",
     "-Wno-unused-private-field",
 ]
+
+
+def get_libkineto_roctracer_srcs(with_api = True):
+    return (
+        ROCM_ACTIVITY_PROFILER_SRCS
+        + ["src/RocLogger.cpp", "src/RoctracerActivityApi.cpp", "src/RoctracerLogger.cpp"]
+        + get_libkineto_cpu_only_srcs(with_api)
+    )
