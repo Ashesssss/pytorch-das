@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Hygon Information Technology Co., Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 """Standalone TorchInductor pass for the unbind(2) backward stack pattern.
 
 This file is copied into torch/_inductor/fx_passes/ and imported from

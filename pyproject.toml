@@ -386,6 +386,8 @@ requires-python = ">=3.10"
 license = "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND ISC AND MIT AND Zlib"
 license-files = [
     "LICENSE",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.md",
     "third_party/FP16/LICENSE",
     "third_party/FXdiv/LICENSE",
     "third_party/NNPACK/LICENSE",
