@@ -104,6 +104,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.utils.cpp_extension import PYTORCH_DTK_VERSION
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -821,8 +822,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         If extra context is created, it would manifest into device 0's memory usage.
         """
         if torch.version.hip:
+            dependency = (
+                "a device management library on HCU"
+                if PYTORCH_DTK_VERSION is not None
+                else "amdsmi on ROCm"
+            )
             raise SkipTest(
-                "Requires amdsmi on ROCm: an extra HIP context uses almost no device "
+                f"Requires {dependency}: an extra HIP context uses almost no device "
                 "memory, while the first RCCL kernel launch allocates ~1 GB of scratch "
                 "on the rank's own device, so memory growth cannot detect it."
             )

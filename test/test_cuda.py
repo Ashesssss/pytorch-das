@@ -168,7 +168,10 @@ def skipIfNonPrimaryRocmPartition(fn):
                 kfd_info = {}
             partition = kfd_info.get("current_partition_id", 0)
             if isinstance(partition, int) and partition != 0:
-                msg = f"no full-GPU amdsmi metrics on partition {partition}"
+                if PYTORCH_DTK_VERSION is not None:
+                    msg = f"no full-GPU device metrics on partition {partition}"
+                else:
+                    msg = f"no full-GPU amdsmi metrics on partition {partition}"
                 raise unittest.SkipTest(msg)
         return fn(self, *args, **kwargs)
 

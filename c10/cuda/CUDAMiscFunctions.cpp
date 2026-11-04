@@ -63,11 +63,19 @@ const char* get_cuda_blocking_message() noexcept {
     // so an out-of-memory exception cannot escape the noexcept callers.
     try {
       if (effective_flag == "1" || effective_flag == "2") {
+#if defined(PYTORCH_DTK_VERSION)
+        rocm_message = "\nGPU kernel serialization mode ";
+#else
         rocm_message = "\nAMD_SERIALIZE_KERNEL=";
+#endif
         rocm_message += effective_flag;
         rocm_message += " only serializes one side of each kernel launch.";
       } else {
+#if defined(PYTORCH_DTK_VERSION)
+        rocm_message = "\nUnsupported GPU kernel serialization mode ";
+#else
         rocm_message = "\nUnsupported AMD_SERIALIZE_KERNEL value ";
+#endif
         rocm_message += effective_flag;
         rocm_message += ".";
       }
