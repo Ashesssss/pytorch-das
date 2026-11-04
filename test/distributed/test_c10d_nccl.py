@@ -777,15 +777,22 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     def _helper_test_extra_cuda_context_by_nvml(self):
         """
-        A helper for `test_extra_cuda_context`, if pynvml (CUDA) or amdsmi (ROCm)
-        is available. They provide python bindings for NVML / AMD SMI.
-        Here we are interested in: nvmlDeviceGetComputeRunningProcesses /
-        amdsmi_get_gpu_process_list
+        A helper for `test_extra_cuda_context` using pynvml, hcusmi, or amdsmi
+        to count device processes.
         """
         if torch.version.hip:
-            # Raises ModuleNotFoundError if amdsmi is not available.
-            handle = torch.cuda._get_amdsmi_handler(self.rank)
-            import amdsmi
+            use_hcusmi = PYTORCH_DTK_VERSION is not None and torch.cuda._HAS_HCUSMI
+            if use_hcusmi:
+                try:
+                    import hcusmi
+
+                    handle = torch.cuda._get_hcusmi_handler(self.rank)
+                except Exception:
+                    use_hcusmi = False
+            if not use_hcusmi:
+                # Raises ModuleNotFoundError if amdsmi is not available.
+                handle = torch.cuda._get_amdsmi_handler(self.rank)
+                import amdsmi
         else:
             import pynvml
 
@@ -800,7 +807,16 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.distributed_c10d._get_default_store()
         store.barrier("work_deleted", self.world_size)
         if torch.version.hip:
-            processes = amdsmi.amdsmi_get_gpu_process_list(handle)
+            if use_hcusmi:
+                try:
+                    processes = hcusmi.hcusmi_get_gpu_process_list(handle)
+                except Exception:
+                    import amdsmi
+
+                    handle = torch.cuda._get_amdsmi_handler(self.rank)
+                    processes = amdsmi.amdsmi_get_gpu_process_list(handle)
+            else:
+                processes = amdsmi.amdsmi_get_gpu_process_list(handle)
         else:
             handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
             processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)

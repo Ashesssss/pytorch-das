@@ -158,7 +158,15 @@ if TEST_CUDA:
 def skipIfNonPrimaryRocmPartition(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
+        use_hcusmi = False
         if TEST_WITH_ROCM and TEST_PYNVML:
+            if PYTORCH_DTK_VERSION is not None and torch.cuda._HAS_HCUSMI:
+                try:
+                    torch.cuda._get_hcusmi_handler()
+                    use_hcusmi = True
+                except Exception:
+                    pass
+        if TEST_WITH_ROCM and TEST_PYNVML and not use_hcusmi:
             import amdsmi
 
             handle = torch.cuda._get_amdsmi_handler()
