@@ -1,3 +1,5 @@
+//  Copyright © 2022 Apple Inc.
+
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ceil_div.h>
 #include <ATen/mps/MPSProfiler.h>

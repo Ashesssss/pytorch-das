@@ -1,3 +1,5 @@
+//  Copyright © 2022 Apple Inc.
+
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BatchLinearAlgebra.h>
