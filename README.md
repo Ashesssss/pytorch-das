@@ -7,14 +7,12 @@
 - 上游项目：PyTorch
 - 上游仓库：[pytorch/pytorch](https://github.com/pytorch/pytorch)
 - 上游分支：main
-- 上游基线 Commit：`37f56e48ce431907080585a595c437f9edb23411`
-- 当前源码版本：`2.16.0a0`（开发版本）
 - 上游 README 原文：[README_ORIGIN.md](README_ORIGIN.md)
 - PyTorch 主项目许可证：BSD-3-Clause，完整条款见 [LICENSE](LICENSE)
 - 贡献和其他声明：[NOTICE](NOTICE)
 - 第三方来源和许可证：[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
-`README_ORIGIN.md` 保留上述固定上游基线的完整原文，供来源对照。
+`README_ORIGIN.md` 保留上游 README 参考副本，供来源对照。
 第三方组件适用各自的许可证；发行包的复合许可信息见 `pyproject.toml`。
 
 Modified by Hygon Information Technology Co., Ltd.
