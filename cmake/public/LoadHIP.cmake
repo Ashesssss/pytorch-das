@@ -124,19 +124,26 @@ macro(find_package_and_print_version PACKAGE_NAME)
 endmacro()
 
 # Use CMake's native HIP language support instead of FindHIP.cmake.
-# Set up the HIP compiler before calling enable_language(HIP).
-if(DEFINED ENV{HIP_CLANG_PATH})
-  file(TO_CMAKE_PATH "$ENV{HIP_CLANG_PATH}" _hip_clang_dir)
-else()
-  set(_hip_clang_dir "${ROCM_PATH}/llvm/bin")
+# Set up the HIP compiler before calling enable_language(HIP). Keep a compiler
+# that is already set, by -D or an earlier enable_language(HIP): replacing it,
+# even with another spelling of the same path, makes CMake delete the whole
+# cache and reconfigure. Not "DEFINED": a failed check_language(HIP) caches
+# NOTFOUND, and that still needs the lookup below.
+if(NOT CMAKE_HIP_COMPILER)
+  if(DEFINED ENV{HIP_CLANG_PATH})
+    file(TO_CMAKE_PATH "$ENV{HIP_CLANG_PATH}" _hip_clang_dir)
+  else()
+    set(_hip_clang_dir "${ROCM_PATH}/llvm/bin")
+  endif()
+  if(WIN32)
+    set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/clang++.exe")
+  else()
+    set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/dcc")
+  endif()
+  if(NOT EXISTS "${CMAKE_HIP_COMPILER}")
+    message(FATAL_ERROR "HIP compiler not found at ${CMAKE_HIP_COMPILER}")
+  endif()
 endif()
-if(WIN32)
-  set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/clang++.exe")
-else()
-  set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/dcc")
-endif()
-if(NOT EXISTS "${CMAKE_HIP_COMPILER}")
-  message(FATAL_ERROR "HIP compiler not found at ${CMAKE_HIP_COMPILER}")
 endif()
 
 set(CMAKE_HIP_PLATFORM "amd" CACHE STRING "HIP platform" FORCE)
@@ -268,6 +275,29 @@ find_file(PYTORCH_HIP_VERSION_HEADER
 )
 if(NOT PYTORCH_HIP_VERSION_HEADER)
   message(FATAL_ERROR "Could not find hip/hip_version.h in ${hip_INCLUDE_DIRS}")
+endif()
+
+# hip::amdhip64's own DT_NEEDED on libhsa-runtime64.so must resolve at link
+# time. Nothing propagates ${ROCM_PATH}/lib as an -rpath-link entry for it, so
+# if some OTHER -rpath-link source elsewhere in the build (e.g. c10's NUMA
+# workaround, which points at libnuma's directory) happens to also contain an
+# unrelated system libhsa-runtime64.so (a stray distro package sharing that
+# multiarch dir), the linker's rpath-link search -- which is checked before
+# -rpath -- resolves against that wrong/incompatible version instead, causing
+# "undefined reference to hsa_amd_vmem_*"-style failures in ANY target that
+# transitively links hip::amdhip64, however deep. Attach this ROCm install's
+# own lib dir directly to the imported target so every consumer inherits it,
+# regardless of how many levels of target_link_libraries separate them from
+# hip::amdhip64. ELF/GNU-ld only.
+if(NOT WIN32 AND NOT APPLE AND TARGET hip::amdhip64)
+  set_property(TARGET hip::amdhip64 APPEND PROPERTY
+    INTERFACE_LINK_OPTIONS "$<BUILD_INTERFACE:LINKER:-rpath-link,${ROCM_PATH}/lib>")
+  # TheRock's vendored sysdeps (e.g. liblzma, needed by a from-source AOTriton)
+  # live outside lib/, so their DT_NEEDED entries need their own entry.
+  if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    set_property(TARGET hip::amdhip64 APPEND PROPERTY
+      INTERFACE_LINK_OPTIONS "$<BUILD_INTERFACE:LINKER:-rpath-link,${ROCM_PATH}/lib/rocm_sysdeps/lib>")
+  endif()
 endif()
 
 file(READ "${PYTORCH_HIP_VERSION_HEADER}" PYTORCH_HIP_VERSION_CONTENT)
@@ -430,6 +460,7 @@ if(PYTORCH_FOUND_HIP)
   if(UNIX)
     # roctx is part of roctracer
     find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
+  endif()
 
     set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
 
