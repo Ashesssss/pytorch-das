@@ -80,6 +80,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
+from torch.utils.cpp_extension import PYTORCH_DTK_VERSION
 
 
 if TYPE_CHECKING:
@@ -5717,7 +5718,13 @@ class TestMetadataJsonFormatCUDA(TestCase):
         )
         for act in gpu_acts:
             if act.type() == "kernel":
-                self.assertNotIn("__amd_rocclr_", act.name())
+                if PYTORCH_DTK_VERSION is not None:
+                    if "__amd_rocclr_" in act.name():
+                        self.fail(
+                            "Runtime-internal GPU activity was reported as a kernel."
+                        )
+                else:
+                    self.assertNotIn("__amd_rocclr_", act.name())
 
     @parametrize("numel", [5, 1024])
     def test_runtime_memsets_are_not_kernels(self, numel):
@@ -5734,7 +5741,13 @@ class TestMetadataJsonFormatCUDA(TestCase):
         self.assertEqual(sum(md.get("bytes", 0) for md in metadata), x.nbytes)
         for act in gpu_acts:
             if act.type() == "kernel":
-                self.assertNotIn("__amd_rocclr_", act.name())
+                if PYTORCH_DTK_VERSION is not None:
+                    if "__amd_rocclr_" in act.name():
+                        self.fail(
+                            "Runtime-internal GPU activity was reported as a kernel."
+                        )
+                else:
+                    self.assertNotIn("__amd_rocclr_", act.name())
 
     def test_runtime_memsets_have_flows(self):
         # The memset API call must start an async CPU->GPU flow that ends on
