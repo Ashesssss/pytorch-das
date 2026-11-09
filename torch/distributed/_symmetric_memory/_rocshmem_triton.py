@@ -6,9 +6,12 @@ integration in _nvshmem_triton.py.  It is only imported on ROCm builds
 (i.e. when ``torch.version.hip is not None``).
 """
 
+import functools
+import hashlib
+import importlib.util
 import logging
 import os
-import sysconfig
+import tempfile
 from typing import Any
 
 import torch
@@ -26,10 +29,15 @@ class RocshmemLibFinder:
     """
     Find the architecture-specific rocSHMEM device bitcode library.
 
-    Environment variable:
-        ``ROCSHMEM_LIB_DIR`` (Optional[str]): directory containing
-        ``librocshmem_device_{arch}.bc``.  When not set, the standard
-        ROCm installation at ``/opt/rocm/lib`` is searched.
+    Search order:
+        1. ``ROCSHMEM_LIB_DIR``, if set (no fallback when the file is missing).
+        2. ``$ROCM_HOME/lib`` or ``$ROCM_PATH/lib``, if either is set.
+        3. ``lib`` of the ``_rocm_sdk_devel`` package from the ``rocm[devel]``
+           wheel, which matches the ROCm version torch depends on.
+        4. ``/opt/rocm/lib``, ``/usr/local/lib`` and ``/usr/lib``.
+
+    Steps 2-4 use the precedence of ``torch.utils.cpp_extension._find_rocm_home``,
+    but fall through when a directory lacks the bitcode.
 
     Example::
         export ROCSHMEM_LIB_DIR=/opt/rocm/lib
@@ -54,11 +62,25 @@ class RocshmemLibFinder:
 
         lib_name = f"librocshmem_device_{arch}.bc"
 
-        search_paths = [
-            os.path.join(os.environ.get("ROCSHMEM_HOME"), "lib64"),
-            os.path.join(os.environ.get("ROCM_PATH"), "rocshmem", "rocshmem_dir", "lib64"),
-            os.path.join(sysconfig.get_path("purelib"), "amd", "rocshmem", "lib"),
-            os.path.join(os.environ.get("ROCM_PATH") or "/opt/rocm", "lib"),
+        search_paths = []
+        rocshmem_home = os.environ.get("ROCSHMEM_HOME")
+        if rocshmem_home:
+            search_paths.append(os.path.join(rocshmem_home, "lib64"))
+        rocm_path_env = os.environ.get("ROCM_PATH")
+        if rocm_path_env:
+            search_paths.append(
+                os.path.join(rocm_path_env, "rocshmem", "rocshmem_dir", "lib64")
+            )
+
+        rocm_home = os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH")
+        if rocm_home:
+            search_paths.append(os.path.join(rocm_home, "lib"))
+        # find_spec locates the wheel without importing it.
+        devel_spec = importlib.util.find_spec("_rocm_sdk_devel")
+        if devel_spec is not None and devel_spec.origin is not None:
+            search_paths.append(os.path.join(os.path.dirname(devel_spec.origin), "lib"))
+        search_paths += [
+            "/opt/rocm/lib",
             "/usr/local/lib",
             "/usr/lib",
         ]
@@ -90,6 +112,79 @@ class RocshmemLibFinder:
         logger.info("Found rocSHMEM device library: %s", lib_path)
         cls.found_device_lib_path = lib_path
         return lib_path
+
+
+# Triton can neither read device globals nor pass rocshmem_ctx_t (a {ptr, ptr}
+# struct, split into two pointer arguments by the AMDGPU ABI). These wrappers call
+# the ctx collectives with ROCSHMEM_CTX_DEFAULT on ROCSHMEM_TEAM_WORLD (team 0),
+# like the rocSHMEM reduce wrappers do. Triton links this textual IR before the
+# device bitcode and sets its target and datalayout. The wrapper names must contain
+# "rocshmem", or Triton will not link the device bitcode (see requires_rocshmem).
+# TODO: Temporary. Remove once rocSHMEM exports extern "C" alltoall/broadcast APIs
+# that use the default ctx and team, like its reduce wrappers (WRAP_REDUCE_OP).
+_TEAM_WORLD_WRAPPERS_LL = r"""
+@ROCSHMEM_CTX_DEFAULT = external addrspace(1) global { ptr, ptr }
+@ROCSHMEM_TEAM_WORLD = external addrspace(4) constant ptr
+
+declare void @rocshmem_ctx_alltoallmem_wg(ptr, ptr, ptr, ptr, ptr, i32) #0
+declare void @rocshmem_ctx_broadcastmem_wg(ptr, ptr, ptr, ptr, ptr, i32, i32) #0
+
+define i32 @torch_rocshmem_alltoallmem_wg(i32 %team, i64 %dest, i64 %source, i32 %nbytes) #0 {
+  %is_world = icmp eq i32 %team, 0
+  br i1 %is_world, label %world, label %unsupported
+world:
+  %ctx = load { ptr, ptr }, ptr addrspace(1) @ROCSHMEM_CTX_DEFAULT
+  %ctx_opaque = extractvalue { ptr, ptr } %ctx, 0
+  %team_opaque = extractvalue { ptr, ptr } %ctx, 1
+  %team_world = load ptr, ptr addrspace(4) @ROCSHMEM_TEAM_WORLD
+  %dest_ptr = inttoptr i64 %dest to ptr
+  %source_ptr = inttoptr i64 %source to ptr
+  call void @rocshmem_ctx_alltoallmem_wg(ptr %ctx_opaque, ptr %team_opaque, ptr %team_world, ptr %dest_ptr, ptr %source_ptr, i32 %nbytes)
+  ret i32 0
+unsupported:
+  ret i32 -1
+}
+
+define i32 @torch_rocshmem_broadcastmem_wg(i32 %team, i64 %dest, i64 %source, i32 %nbytes, i32 %pe_root) #0 {
+  %is_world = icmp eq i32 %team, 0
+  br i1 %is_world, label %world, label %unsupported
+world:
+  %ctx = load { ptr, ptr }, ptr addrspace(1) @ROCSHMEM_CTX_DEFAULT
+  %ctx_opaque = extractvalue { ptr, ptr } %ctx, 0
+  %team_opaque = extractvalue { ptr, ptr } %ctx, 1
+  %team_world = load ptr, ptr addrspace(4) @ROCSHMEM_TEAM_WORLD
+  %dest_ptr = inttoptr i64 %dest to ptr
+  %source_ptr = inttoptr i64 %source to ptr
+  call void @rocshmem_ctx_broadcastmem_wg(ptr %ctx_opaque, ptr %team_opaque, ptr %team_world, ptr %dest_ptr, ptr %source_ptr, i32 %nbytes, i32 %pe_root)
+  ret i32 0
+unsupported:
+  ret i32 -1
+}
+
+attributes #0 = { convergent mustprogress nounwind }
+"""
+
+
+@functools.cache
+def _get_team_world_wrappers_path() -> str:
+    # Every @requires_rocshmem kernel hashes this file on each compile, so it must
+    # outlive the process that wrote it (e.g. forked children). Use a content-named
+    # file in the per-user Triton cache dir, written atomically and never removed.
+    import triton
+
+    cache_dir = triton.knobs.cache.dir
+    digest = hashlib.sha256(_TEAM_WORLD_WRAPPERS_LL.encode()).hexdigest()[:16]
+    path = os.path.join(cache_dir, f"torch_rocshmem_wrappers_{digest}.ll")
+    if not os.path.isfile(path):
+        os.makedirs(cache_dir, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w", dir=cache_dir, suffix=".ll", delete=False
+        ) as f:
+            f.write(_TEAM_WORLD_WRAPPERS_LL)
+        # NamedTemporaryFile is 0600; other users sharing the cache dir must read it.
+        os.chmod(f.name, 0o644)
+        os.replace(f.name, path)
+    return path
 
 
 class RocshmemKernelRegistry(ShmemKernelRegistry):
@@ -144,6 +239,9 @@ def requires_rocshmem(  # type: ignore[no-untyped-def]
         registry=RocshmemKernelRegistry,
         init_hook=_rocshmem_init_hook,
         error_prefix="@requires_rocshmem",
+        # The device library is linked only because "rocshmem" is a substring of
+        # the torch_rocshmem_* wrapper names; see build_requires_shmem_decorator.
+        extra_extern_libs={"torch_rocshmem": _get_team_world_wrappers_path()},
     )
 
 
@@ -152,10 +250,10 @@ if has_triton():
     import triton.language as tl
     from triton.language import core
 
+    _ROCM_VERSION = tuple(int(v) for v in (torch.version.rocm or "0.0").split(".")[:2])
     # ROCm < 10.1 ships rocSHMEM < 3.7.0, whose device reduce breaks when n_pes * nreduce > 1024.
-    _ROCSHMEM_REDUCE_SIZE_LIMITED = tl.constexpr(
-        tuple(int(v) for v in (torch.version.rocm or "0.0").split(".")[:2]) < (10, 1)
-    )
+    _ROCSHMEM_REDUCE_SIZE_LIMITED = tl.constexpr(_ROCM_VERSION < (10, 1))
+    _ROCSHMEM_HAS_ALLTOALL_BROADCAST = tl.constexpr(_ROCM_VERSION >= (10, 2))
 
     # -----------------------------------------------------------------------
     # rocSHMEM device API — Triton-callable device functions.
@@ -437,60 +535,69 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    def _rocshmem_collective_type(dtype) -> str:  # type: ignore[no-untyped-def]
-        dtype_name = str(dtype).replace("tl.", "")
-        dtype_map = {
-            "int8": "schar",
-            "uint8": "uchar",
-            "int16": "short",
-            "uint16": "ushort",
-            "int32": "int",
-            "uint32": "uint",
-            "int64": "longlong",
-            "uint64": "ulonglong",
-            "fp32": "float",
-            "fp64": "double",
-        }
-        if dtype_name not in dtype_map:
-            raise TypeError(
-                f"Unsupported rocSHMEM collective dtype: {dtype_name}. "
-                f"Supported dtypes: {list(dtype_map.keys())}"
+    def _check_world_team(team, op_name, _semantic):  # type: ignore[no-untyped-def]
+        if isinstance(team, core.constexpr) and team.value != 0:
+            raise ValueError(
+                f"Unsupported rocSHMEM {op_name} team: {team.value}. Only team 0 is supported."
             )
-        return dtype_map[dtype_name]
+        return core.cast(team, core.int32, _semantic=_semantic)
 
     @triton.jit
     def alltoall(team, dest, source, nelems_per_pe):  # type: ignore[no-untyped-def]
-        """Workgroup-scoped fixed-size all-to-all over a rocSHMEM team."""
+        """
+        All-to-all exchange between all PEs.
+
+        Calls the work-group scoped ``rocshmem_ctx_alltoallmem_wg`` on the default
+        context. Requires ROCm >= 10.2.
+
+        Args:
+            team: The team handle. Only 0 (all PEs) is supported. A compile-time
+                team other than 0 raises ValueError. A runtime team other than 0
+                does nothing and returns non-zero.
+            dest: Destination tensor. Must hold nelems_per_pe * n_pes elements.
+            source: Source tensor with nelems_per_pe * n_pes elements. Must be the same type as dest.
+            nelems_per_pe: Number of elements to exchange with each PE. The byte
+                count is passed as int32 because the rocSHMEM alltoall API takes a
+                C ``int``, and rocSHMEM computes n_pes times it as an ``int``.
+
+        Notes:
+            - All threads of the work-group must call this function.
+            - This is a collective operation that must be called by all PEs.
+            - Data layout: source=[data_for_pe0, data_for_pe1, ...], dest=[data_from_pe0, data_from_pe1, ...]
+
+        Example:
+            ```
+            # Each PE exchanges 10 elements with every other PE
+            rocshmem.alltoall(0, dest_tensor, src_tensor, 10)
+            ```
+        """
+        tl.static_assert(
+            _ROCSHMEM_HAS_ALLTOALL_BROADCAST,
+            "rocshmem alltoall requires ROCm >= 10.2 device bitcode.",
+        )
         tl.static_assert(dest.type == source.type)
-        return _alltoall_wg(
-            team.to(tl.int64),
-            dest.to(tl.int64),
-            source.to(tl.int64),
-            nelems_per_pe.to(tl.int32),
-            dest.type.element_ty,
+        nbytes_per_pe = nelems_per_pe * dest.type.element_ty.itemsize
+        return _alltoallmem_wg(
+            team,
+            tl.cast(dest, tl.int64),
+            tl.cast(source, tl.int64),
+            tl.cast(nbytes_per_pe, tl.int32),
         )
 
     @core.extern
-    def _alltoall_wg(  # type: ignore[no-untyped-def]
-        team,
-        dest,
-        source,
-        nelems_per_pe,
-        dtype,
-        _semantic=None,
-    ):
-        type_name = _rocshmem_collective_type(dtype)
+    def _alltoallmem_wg(team, dest, source, nbytes_per_pe, _semantic=None):  # type: ignore[no-untyped-def]
+        team = _check_world_team(team, "alltoall", _semantic)
         return core.extern_elementwise(
             "",
             "",
-            [team, dest, source, nelems_per_pe],
+            [team, dest, source, nbytes_per_pe],
             {
                 (
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int32"),
-                ): (f"rocshmem_{type_name}_alltoall_wg", core.dtype("int32"))
+                    core.dtype("int32"),  # team (only 0 is supported)
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int32"),  # bytes per PE
+                ): ("torch_rocshmem_alltoallmem_wg", core.dtype("int32"))
             },
             is_pure=False,
             _semantic=_semantic,
@@ -498,40 +605,61 @@ if has_triton():
 
     @triton.jit
     def broadcast(team, dest, source, nelems, pe_root):  # type: ignore[no-untyped-def]
-        """Workgroup-scoped broadcast over a rocSHMEM team."""
+        """
+        Broadcast data from a root PE to all PEs.
+
+        Calls the work-group scoped ``rocshmem_ctx_broadcastmem_wg`` on the default
+        context. Requires ROCm >= 10.2.
+
+        Args:
+            team: The team handle. Only 0 (all PEs) is supported. A compile-time
+                team other than 0 raises ValueError. A runtime team other than 0
+                does nothing and returns non-zero.
+            dest: Destination tensor. All PEs receive data here.
+            source: Source tensor on the root PE. Must be the same type as dest.
+            nelems: Number of elements to broadcast. The byte count is passed as
+                int32 because the rocSHMEM broadcast API takes a C ``int``.
+            pe_root: PE number of the root PE that provides the source data.
+
+        Notes:
+            - All threads of the work-group must call this function.
+            - This is a collective operation that must be called by all PEs.
+
+        Example:
+            ```
+            # Broadcast 100 elements from PE 0 to all PEs
+            rocshmem.broadcast(0, dest_tensor, src_tensor, 100, 0)
+            ```
+        """
+        tl.static_assert(
+            _ROCSHMEM_HAS_ALLTOALL_BROADCAST,
+            "rocshmem broadcast requires ROCm >= 10.2 device bitcode.",
+        )
         tl.static_assert(dest.type == source.type)
-        return _broadcast_wg(
-            team.to(tl.int64),
-            dest.to(tl.int64),
-            source.to(tl.int64),
-            nelems.to(tl.int32),
-            pe_root.to(tl.int32),
-            dest.type.element_ty,
+        nbytes = nelems * dest.type.element_ty.itemsize
+        return _broadcastmem_wg(
+            team,
+            tl.cast(dest, tl.int64),
+            tl.cast(source, tl.int64),
+            tl.cast(nbytes, tl.int32),
+            tl.cast(pe_root, tl.int32),
         )
 
     @core.extern
-    def _broadcast_wg(  # type: ignore[no-untyped-def]
-        team,
-        dest,
-        source,
-        nelems,
-        pe_root,
-        dtype,
-        _semantic=None,
-    ):
-        type_name = _rocshmem_collective_type(dtype)
+    def _broadcastmem_wg(team, dest, source, nbytes, pe_root, _semantic=None):  # type: ignore[no-untyped-def]
+        team = _check_world_team(team, "broadcast", _semantic)
         return core.extern_elementwise(
             "",
             "",
-            [team, dest, source, nelems, pe_root],
+            [team, dest, source, nbytes, pe_root],
             {
                 (
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int32"),
-                    core.dtype("int32"),
-                ): (f"rocshmem_{type_name}_broadcast_wg", core.dtype("int32"))
+                    core.dtype("int32"),  # team (only 0 is supported)
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int32"),  # size in bytes
+                    core.dtype("int32"),  # pe_root
+                ): ("torch_rocshmem_broadcastmem_wg", core.dtype("int32"))
             },
             is_pure=False,
             _semantic=_semantic,
@@ -605,12 +733,7 @@ if has_triton():
                 f"Unsupported reduction operation: '{op_name}'. "
                 f"Supported ops are {supported_ops}"
             )
-        # Check before the cast: tl.cast turns a constexpr into a tensor.
-        if isinstance(team, core.constexpr) and team.value != 0:
-            raise ValueError(
-                f"Unsupported rocSHMEM reduction team: {team.value}. Only team 0 is supported."
-            )
-        team = core.cast(team, core.int32, _semantic=_semantic)
+        team = _check_world_team(team, "reduction", _semantic)
         func = f"rocshmem_{dtype_to_rocshmem[dtype_name]}_{op_name}_reduce_wg"
         return core.extern_elementwise(
             "",

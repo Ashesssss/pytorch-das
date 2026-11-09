@@ -207,9 +207,7 @@ inline std::string ComputeTypeFor() {
 // ROCBLAS and hipBLASLt.
 template <>
 inline std::string ComputeTypeFor<float>() {
-  const auto precision = at::globalContext().float32Precision(
-      at::Float32Backend::CUDA, at::Float32Op::MATMUL);
-  if (precision == at::Float32Precision::TF32) {
+  if (at::globalContext().allowTF32CuBLAS()) {
     return "xf32_r";
   }
   if (at::cuda::blas::useBF16x9()) {
@@ -290,13 +288,10 @@ inline std::string to_string_epilogue(const at::cuda::blas::GEMMAndBiasActivatio
   switch (value) {
     case at::cuda::blas::GEMMAndBiasActivationEpilogue::None:
       return std::string("None");
-      break;
     case at::cuda::blas::GEMMAndBiasActivationEpilogue::RELU:
       return std::string("RELU");
-      break;
     case cuda::blas::GEMMAndBiasActivationEpilogue::GELU:
       return std::string("GELU");
-      break;
     default:
       return std::string("unknown");
   }

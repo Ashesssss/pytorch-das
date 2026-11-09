@@ -143,7 +143,8 @@ class RocblasGemmOp : public Callable<GemmParams<T>> {
 
     TuningStatus Call(const GemmParams<T>* params) override {
       auto input_output_type = RocBlasDataTypeFor<T>();
-      if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32 && input_output_type == rocblas_datatype_f32_r)
+      if (at::globalContext().allowTF32CuBLAS() &&
+          input_output_type == rocblas_datatype_f32_r)
         return FAIL;  // no support for TF32 in rocBLAS
       auto compute_type = RocBlasComputeTypeFor<T>();
       auto h_a = DoCastForHalfOrBfloat16(params->alpha);
@@ -176,8 +177,8 @@ class RocblasGemmOp : public Callable<GemmParams<T>> {
 
 template <typename T>
 auto GetRocBlasGemmTypeStringAndOps() {
-  // getCurrentCUDABlasHandle() would create a public handle, with its own
-  // workspace, for each stream this runs on.
+  // getCurrentCUDABlasHandle() would create a public handle for each stream
+  // this runs on, each keeping a workspace bound for the life of the process.
   auto scoped_handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   rocblas_handle handle = (rocblas_handle)(cublasHandle_t)scoped_handle;
   rocblas_int solution_size;
@@ -220,7 +221,8 @@ class RocblasGemmStridedBatchedOp : public Callable<GemmStridedBatchedParams<T>>
 
     TuningStatus Call(const GemmStridedBatchedParams<T>* params) override {
       auto input_output_type = RocBlasDataTypeFor<T>();
-      if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32 && input_output_type == rocblas_datatype_f32_r)
+      if (at::globalContext().allowTF32CuBLAS() &&
+          input_output_type == rocblas_datatype_f32_r)
         return FAIL;  // no support for TF32 in rocBLAS
       auto compute_type = RocBlasComputeTypeFor<T>();
       auto h_a = DoCastForHalfOrBfloat16(params->alpha);
@@ -254,8 +256,8 @@ class RocblasGemmStridedBatchedOp : public Callable<GemmStridedBatchedParams<T>>
 
 template <typename T>
 auto GetRocBlasGemmStridedBatchedTypeStringAndOps() {
-  // getCurrentCUDABlasHandle() would create a public handle, with its own
-  // workspace, for each stream this runs on.
+  // getCurrentCUDABlasHandle() would create a public handle for each stream
+  // this runs on, each keeping a workspace bound for the life of the process.
   auto scoped_handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   rocblas_handle handle = (rocblas_handle)(cublasHandle_t)scoped_handle;
   rocblas_int solution_size;
