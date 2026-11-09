@@ -1204,7 +1204,11 @@ struct RocmMmaCdna {
     return false;
 #else
     if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
+#if defined(PYTORCH_DTK_VERSION)
+      printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is not supported on this HCU device architecture\n");
+#else
       printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is only supported on AMD gpu arch greater than or equal to CDNA2\n");
+#endif
       return false;
     }
     return true;
@@ -2108,7 +2112,11 @@ at::Tensor _weight_int4pack_mm_cuda(
       A.device() == B.device() && A.device() == qScaleAndZeros.device());
 
   if (!isCDNA2orLater(A.device().index()) && !isRDNA3(A.device().index()) && !isRDNA4(A.device().index())) {
+#if defined(PYTORCH_DTK_VERSION)
+    TORCH_CHECK(false, "_weight_int4pack_mm_cuda is not supported on this HCU device architecture");
+#else
     TORCH_CHECK(false, "_weight_int4pack_mm_cuda is only supported on AMD gpu arch greater than or equal to CDNA2, or RDNA3 or later");
+#endif
   }
 
   constexpr int32_t kMTileSize = 16;
@@ -2292,7 +2300,11 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8);
 
   if (!isCDNA2orLater(in.device().index()) && !isRDNA3(in.device().index()) && !isRDNA4(in.device().index())) {
+#if defined(PYTORCH_DTK_VERSION)
+    TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is not supported on this HCU device architecture");
+#else
     TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is only supported on AMD gpu arch greater than or equal to CDNA2, or RDNA3 or later");
+#endif
   }
   constexpr int32_t kNTileSize = 16;
   constexpr int32_t kKTileSize = 16;

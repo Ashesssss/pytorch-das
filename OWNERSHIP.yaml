@@ -762,7 +762,7 @@ ownership:
     owners: [jeffdaily, jithunnair-amd]
     section: infra_developer_tools
     paths:
-      - /tools/amd_build/: [jeffdaily, jithunnair-amd]
+      - /tools/hcu_build/: [jeffdaily, jithunnair-amd]
   - name: lint
     labels: ["module: lint"]
     owners: []
